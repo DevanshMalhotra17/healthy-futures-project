@@ -29,7 +29,7 @@ const AI_EMAIL = "assistant@healthyfutures.app";
 
 export default function MessagesScreen() {
   const insets = useSafeAreaInsets();
-  const { token, email, role } = useAuth();
+  const { token, email, role, coach } = useAuth();
   const isCoach = role === "coach";
 
   const [roster, setRoster] = useState<RosterStudent[]>([]);
@@ -61,9 +61,14 @@ export default function MessagesScreen() {
       });
 
       const merged = [...t];
-      // Coaches should be able to open a chat with any student on their roster,
-      // even before either side has sent a first message.
-      const extras = isCoach ? roster.map((s) => s.email) : [];
+      // Either side should be able to start a conversation before a first
+      // message exists: a coach with any roster student, a student with their
+      // coach.
+      const extras = isCoach
+        ? roster.map((s) => s.email)
+        : coach?.email
+        ? [coach.email]
+        : [];
       for (const candidate of [AI_EMAIL, ...extras]) {
         if (!merged.some((th) => th.with_email === candidate)) {
           merged.push(emptyThread(candidate));
@@ -86,7 +91,7 @@ export default function MessagesScreen() {
     } finally {
       setLoading(false);
     }
-  }, [token, activeThread, isCoach, roster]);
+  }, [token, activeThread, isCoach, roster, coach?.email]);
 
   const refreshMessages = useCallback(async () => {
     if (!token || !activeThread) return;
@@ -136,6 +141,7 @@ export default function MessagesScreen() {
     if (withEmail === AI_EMAIL) return "AI Assistant";
     const student = roster.find((s) => s.email === withEmail);
     if (student) return student.fullName;
+    if (!isCoach && coach && withEmail === coach.email) return coach.fullName;
     return isCoach ? withEmail : "Coach";
   }
 

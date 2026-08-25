@@ -10,8 +10,12 @@ import {
   TextInput,
   Modal,
   Alert,
+  Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { colors, radius, spacing, fonts } from "@/theme";
 import { useAuth } from "@/state/AuthContext";
 import {
@@ -25,6 +29,8 @@ import {
   AttendanceRow,
 } from "@/api/sessions";
 import { CheckIcon } from "@/components/Icons";
+
+type PickerTarget = "date" | "start" | "end" | null;
 
 export default function ScheduleScreen() {
   const insets = useSafeAreaInsets();
@@ -399,47 +405,51 @@ function SessionForm({
 }) {
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
-  const [date, setDate] = useState("");
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
+  const [start, setStart] = useState(() => defaultStart());
+  const [end, setEnd] = useState<Date | null>(null);
+  const [picker, setPicker] = useState<PickerTarget>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
     if (session) {
-      const s = new Date(session.startsAt);
       setTitle(session.title);
       setLocation(session.location ?? "");
-      setDate(toDateInput(s));
-      setStartTime(toTimeInput(s));
-      setEndTime(session.endsAt ? toTimeInput(new Date(session.endsAt)) : "");
+      setStart(new Date(session.startsAt));
+      setEnd(session.endsAt ? new Date(session.endsAt) : null);
     } else {
       setTitle("");
       setLocation("");
-      setDate("");
-      setStartTime("");
-      setEndTime("");
+      setStart(defaultStart());
+      setEnd(null);
     }
+    setPicker(null);
     setFormError(null);
   }, [visible, session]);
 
+  // Android shows one modal at a time, so date and time are separate steps.
+  function onPickerChange(event: DateTimePickerEvent, picked?: Date) {
+    const target = picker;
+    if (Platform.OS !== "ios") setPicker(null);
+    if (event.type === "dismissed" || !picked || !target) return;
+
+    if (target === "date") {
+      setStart(withDate(start, picked));
+      if (end) setEnd(withDate(end, picked));
+    } else if (target === "start") {
+      setStart(withTime(start, picked));
+    } else {
+      setEnd(withTime(end ?? start, picked));
+    }
+  }
+
   async function handleSave() {
-    const startsAt = combine(date, startTime);
     if (!title.trim()) {
       setFormError("Give the session a title.");
       return;
     }
-    if (!startsAt) {
-      setFormError("Enter the date as YYYY-MM-DD and time as HH:MM.");
-      return;
-    }
-    const endsAt = endTime ? combine(date, endTime) : null;
-    if (endTime && !endsAt) {
-      setFormError("End time should look like HH:MM.");
-      return;
-    }
-    if (endsAt && endsAt.getTime() < startsAt.getTime()) {
+    if (end && end.getTime() < start.getTime()) {
       setFormError("The session can't end before it starts.");
       return;
     }
@@ -449,8 +459,8 @@ function SessionForm({
       await onSave({
         title: title.trim(),
         location: location.trim() || null,
-        startsAt: startsAt.toISOString(),
-        endsAt: endsAt ? endsAt.toISOString() : null,
+        startsAt: start.toISOString(),
+        endsAt: end ? end.toISOString() : null,
       });
     } catch {
       setFormError("Couldn't save that session.");
@@ -484,39 +494,54 @@ function SessionForm({
           />
 
           <Text style={styles.fieldLabel}>Date</Text>
-          <TextInput
-            style={styles.input}
-            value={date}
-            onChangeText={setDate}
-            placeholder="2026-08-29"
-            placeholderTextColor={colors.inkSoft}
-            keyboardType="numbers-and-punctuation"
-          />
+          <Pressable style={styles.input} onPress={() => setPicker("date")}>
+            <Text style={styles.inputValue}>
+              {start.toLocaleDateString([], {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </Text>
+          </Pressable>
 
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
             <View style={{ flex: 1 }}>
               <Text style={styles.fieldLabel}>Start</Text>
-              <TextInput
-                style={styles.input}
-                value={startTime}
-                onChangeText={setStartTime}
-                placeholder="09:00"
-                placeholderTextColor={colors.inkSoft}
-                keyboardType="numbers-and-punctuation"
-              />
+              <Pressable style={styles.input} onPress={() => setPicker("start")}>
+                <Text style={styles.inputValue}>{formatTime(start)}</Text>
+              </Pressable>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.fieldLabel}>End (optional)</Text>
-              <TextInput
-                style={styles.input}
-                value={endTime}
-                onChangeText={setEndTime}
-                placeholder="12:00"
-                placeholderTextColor={colors.inkSoft}
-                keyboardType="numbers-and-punctuation"
-              />
+              <Pressable style={styles.input} onPress={() => setPicker("end")}>
+                <Text style={[styles.inputValue, !end && styles.inputPlaceholder]}>
+                  {end ? formatTime(end) : "Not set"}
+                </Text>
+              </Pressable>
             </View>
           </View>
+
+          {end && (
+            <Pressable onPress={() => setEnd(null)} style={styles.clearEndBtn}>
+              <Text style={styles.clearEndText}>Clear end time</Text>
+            </Pressable>
+          )}
+
+          {picker && (
+            <DateTimePicker
+              value={picker === "end" ? end ?? start : start}
+              mode={picker === "date" ? "date" : "time"}
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              onChange={onPickerChange}
+            />
+          )}
+
+          {Platform.OS === "ios" && picker && (
+            <Pressable style={styles.pickerDoneBtn} onPress={() => setPicker(null)}>
+              <Text style={styles.pickerDoneText}>Done</Text>
+            </Pressable>
+          )}
 
           {formError && <Text style={styles.errorText}>{formError}</Text>}
 
@@ -542,31 +567,25 @@ function formatTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function toDateInput(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
+// Next hour on the half-hour — a sensible starting point for a new session.
+function defaultStart(): Date {
+  const d = new Date();
+  d.setHours(d.getHours() + 1, 0, 0, 0);
+  return d;
 }
 
-function toTimeInput(d: Date): string {
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+// Dates are composed from local parts so a session saves at the wall-clock time
+// the coach picked, in their own timezone.
+function withDate(base: Date, picked: Date): Date {
+  const d = new Date(base);
+  d.setFullYear(picked.getFullYear(), picked.getMonth(), picked.getDate());
+  return d;
 }
 
-// Built from local date/time parts so a session saves at the wall-clock time
-// the coach typed, in their own timezone.
-function combine(dateStr: string, timeStr: string): Date | null {
-  const dateMatch = dateStr.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  const timeMatch = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!dateMatch || !timeMatch) return null;
-
-  const [, y, mo, d] = dateMatch;
-  const [, h, mi] = timeMatch;
-  const hour = Number(h);
-  const minute = Number(mi);
-  if (hour > 23 || minute > 59) return null;
-
-  const result = new Date(Number(y), Number(mo) - 1, Number(d), hour, minute, 0, 0);
-  return Number.isNaN(result.getTime()) ? null : result;
+function withTime(base: Date, picked: Date): Date {
+  const d = new Date(base);
+  d.setHours(picked.getHours(), picked.getMinutes(), 0, 0);
+  return d;
 }
 
 const styles = StyleSheet.create({
@@ -738,6 +757,17 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     color: colors.ink,
   },
+  inputValue: { fontFamily: fonts.body, fontSize: 13.5, color: colors.ink },
+  inputPlaceholder: { color: colors.inkSoft },
+  clearEndBtn: { alignSelf: "flex-end", paddingVertical: 8, paddingHorizontal: 4 },
+  clearEndText: { fontFamily: fonts.bodyBold, fontSize: 11.5, color: colors.inkSoft },
+  pickerDoneBtn: {
+    alignSelf: "flex-end",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  pickerDoneText: { fontFamily: fonts.bodyExtraBold, fontSize: 13, color: colors.pitch },
+
   modalActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
   cancelBtn: {
     flex: 1,

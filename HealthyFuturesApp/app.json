@@ -41,7 +41,8 @@
           "microphonePermission": "Healthy Futures uses your microphone to record audio with your practice clips."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ]
   }
 }

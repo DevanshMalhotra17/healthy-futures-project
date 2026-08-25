@@ -8,7 +8,7 @@ const EMAIL_KEY = "healthy_futures_auth_email";
 const FULL_NAME_KEY = "healthy_futures_auth_full_name";
 const ROLE_KEY = "healthy_futures_auth_role";
 
-type CoachInfo = { id: string; fullName: string } | null;
+type CoachInfo = { id: string; fullName: string; email: string } | null;
 
 type AuthContextValue = {
   token: string | null;

@@ -13,7 +13,7 @@ export type AuthResult = { token: string; user: AuthUser };
 export type AuthErrorBody = { error: string };
 
 export type MeUser = AuthUser & {
-  coach: { id: string; fullName: string } | null;
+  coach: { id: string; fullName: string; email: string } | null;
   inviteCode: string | null;
 };
 

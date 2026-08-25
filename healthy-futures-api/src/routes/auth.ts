@@ -170,18 +170,24 @@ router.get(
     }
     const user = result.rows[0];
 
-    let coach: { id: string; fullName: string } | null = null;
+    // The coach's email is included because messaging is addressed by email —
+    // without it a student has no way to open a thread with their coach.
+    let coach: { id: string; fullName: string; email: string } | null = null;
     let inviteCode: string | null = null;
 
     if (user.role === "student") {
       const link = await pool.query(
-        `SELECT u.id, u.full_name FROM coach_student_links l
+        `SELECT u.id, u.full_name, u.email FROM coach_student_links l
          JOIN users u ON u.id = l.coach_id
          WHERE l.student_id = $1`,
         [user.id]
       );
       if (link.rows.length > 0) {
-        coach = { id: link.rows[0].id, fullName: link.rows[0].full_name };
+        coach = {
+          id: link.rows[0].id,
+          fullName: link.rows[0].full_name,
+          email: link.rows[0].email,
+        };
       }
     } else if (user.role === "coach") {
       const profile = await pool.query(

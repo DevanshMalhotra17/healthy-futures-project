@@ -10,6 +10,7 @@ import checkinsRoutes from "./routes/checkins";
 import routinesRoutes from "./routes/routines";
 import criteriaRoutes from "./routes/criteria";
 import sessionsRoutes from "./routes/sessions";
+import nutritionRoutes from "./routes/nutrition";
 import { errorHandler, notFoundHandler } from "./middleware/errors";
 import { assertAuthConfig } from "./middleware/auth";
 import { pool } from "./db/pool";
@@ -61,6 +62,8 @@ app.use("/api/checkins", checkinsRoutes);
 app.use("/api/routines", routinesRoutes);
 app.use("/api/criteria", criteriaRoutes);
 app.use("/api/sessions", sessionsRoutes);
+// The frontend's nutrition client posts to /api/recipe-recommendation.
+app.use("/api/recipe-recommendation", messageLimiter, nutritionRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
