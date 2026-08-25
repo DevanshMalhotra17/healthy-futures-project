@@ -1,8 +1,8 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing, fonts } from "@/theme";
-import { companions, agenda, criteria } from "@/data/mockData";
+import { companions, agenda } from "@/data/mockData";
 import { PinIcon, FlameIcon, CheckIcon } from "@/components/Icons";
 import ProgressRing from "@/components/ProgressRing";
 import CompanionCard from "@/components/CompanionCard";
@@ -10,6 +10,8 @@ import HealthScoreCard from "@/components/HealthScoreCard";
 import PracticeVideoUpload from "@/components/PracticeVideoUpload";
 import { useAuth } from "@/state/AuthContext";
 import { greetingFor, firstNameOf } from "@/utils/greeting";
+import { getCriteria, CriteriaCard } from "@/api/criteria";
+import { getToday, FITNESS_DAYS_TARGET } from "@/api/routines";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { RootTabParamList } from "@/navigation/RootNavigator";
 
@@ -17,8 +19,33 @@ type Props = BottomTabScreenProps<RootTabParamList, "Home">;
 
 export default function HomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { fullName } = useAuth();
-  const metCount = criteria.filter((c) => c.met).length;
+  const { fullName, token } = useAuth();
+  const [card, setCard] = useState<CriteriaCard | null>(null);
+  const [routine, setRoutine] = useState<{ fitnessDays: number; streak: number } | null>(null);
+  const [loadingCard, setLoadingCard] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!token) {
+      setLoadingCard(false);
+      return;
+    }
+    const [criteriaResult, routineResult] = await Promise.allSettled([
+      getCriteria(undefined, token),
+      getToday(token),
+    ]);
+    if (criteriaResult.status === "fulfilled") setCard(criteriaResult.value);
+    if (routineResult.status === "fulfilled") {
+      setRoutine({
+        fitnessDays: routineResult.value.fitness_days_this_week,
+        streak: routineResult.value.habit_streak,
+      });
+    }
+    setLoadingCard(false);
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <ScrollView
@@ -41,23 +68,35 @@ export default function HomeScreen({ navigation }: Props) {
               <Text style={styles.locText}>Mentors Matter · Trenton</Text>
             </View>
           </View>
-          <View style={styles.streakChip}>
-            <FlameIcon size={13} />
-            <Text style={styles.streakText}>12</Text>
-          </View>
+          {routine !== null && routine.streak > 0 && (
+            <View style={styles.streakChip}>
+              <FlameIcon size={13} />
+              <Text style={styles.streakText}>{routine.streak}</Text>
+            </View>
+          )}
         </View>
 
-        {/* Pitch ring card */}
-        <View style={styles.ringCard}>
-          <ProgressRing progress={1} centerValue="2/2" centerLabel="Sessions" />
+        {/* At-home routine progress for this week */}
+        <Pressable style={styles.ringCard} onPress={() => navigation.navigate("Routine")}>
+          <ProgressRing
+            progress={Math.min(1, (routine?.fitnessDays ?? 0) / FITNESS_DAYS_TARGET)}
+            centerValue={`${routine?.fitnessDays ?? 0}/${FITNESS_DAYS_TARGET}`}
+            centerLabel="Fitness"
+          />
           <View style={styles.ringCopy}>
             <Text style={styles.eyebrow}>This week</Text>
-            <Text style={styles.ringHeadline}>Full attendance,{"\n"}full effort.</Text>
+            <Text style={styles.ringHeadline}>
+              {(routine?.fitnessDays ?? 0) >= FITNESS_DAYS_TARGET
+                ? "Target met.\nNice work."
+                : "At-home routine"}
+            </Text>
             <Text style={styles.ringSub}>
-              Cooper Field + WAC both logged. Keep the streak alive Saturday.
+              {(routine?.fitnessDays ?? 0) >= FITNESS_DAYS_TARGET
+                ? `${routine?.streak ?? 0}-day habit streak. Keep it rolling.`
+                : `Aim for ${FITNESS_DAYS_TARGET}–5 fitness days. Tap to log today.`}
             </Text>
           </View>
-        </View>
+        </Pressable>
 
         {/* Practice video upload */}
         <View style={{ marginTop: spacing.md }}>
@@ -104,24 +143,55 @@ export default function HomeScreen({ navigation }: Props) {
           ))}
         </View>
 
-        {/* Level up */}
+        {/* Level up — coach-rated criteria, plus auto-computed attendance */}
         <View style={styles.levelCard}>
           <View style={styles.levelTop}>
             <Text style={styles.levelTitle}>Level up</Text>
-            <View style={styles.levelBadge}>
-              <Text style={styles.levelBadgeText}>{metCount} / {criteria.length} this month</Text>
-            </View>
-          </View>
-          <View style={{ marginTop: spacing.md, gap: 9 }}>
-            {criteria.map((c) => (
-              <View style={styles.critItem} key={c.label}>
-                <View style={[styles.critDot, c.met ? styles.critDotOn : styles.critDotOff]}>
-                  {c.met && <CheckIcon size={10} color={colors.white} />}
-                </View>
-                <Text style={[styles.critLabel, !c.met && { color: colors.inkSoft }]}>{c.label}</Text>
+            {card && (
+              <View style={styles.levelBadge}>
+                <Text style={styles.levelBadgeText}>
+                  {card.met_count} / {card.total} this month
+                </Text>
               </View>
-            ))}
+            )}
           </View>
+
+          {loadingCard ? (
+            <View style={{ paddingVertical: spacing.lg, alignItems: "center" }}>
+              <ActivityIndicator color={colors.pitch} />
+            </View>
+          ) : !card ? (
+            <Text style={styles.levelEmpty}>
+              Log in to see your progress toward the next level.
+            </Text>
+          ) : (
+            <>
+              <View style={{ marginTop: spacing.md, gap: 9 }}>
+                {card.items.map((c) => (
+                  <View style={styles.critItem} key={c.key}>
+                    <View style={[styles.critDot, c.met ? styles.critDotOn : styles.critDotOff]}>
+                      {c.met && <CheckIcon size={10} color={colors.white} />}
+                    </View>
+                    <Text style={[styles.critLabel, !c.met && { color: colors.inkSoft }]}>
+                      {c.label}
+                    </Text>
+                    {c.detail && <Text style={styles.critDetail}>{c.detail}</Text>}
+                  </View>
+                ))}
+              </View>
+              {!card.rated && (
+                <Text style={styles.levelEmpty}>
+                  Your coach hasn't rated this month yet. Attendance updates automatically.
+                </Text>
+              )}
+              {card.note && (
+                <View style={styles.noteBlock}>
+                  <Text style={styles.noteLabel}>Coach note</Text>
+                  <Text style={styles.noteText}>{card.note}</Text>
+                </View>
+              )}
+            </>
+          )}
         </View>
       </View>
     </ScrollView>
@@ -212,4 +282,32 @@ const styles = StyleSheet.create({
   critDotOn: { backgroundColor: colors.pitch },
   critDotOff: { borderWidth: 1.6, borderColor: colors.line },
   critLabel: { fontFamily: fonts.body, fontSize: 12.5, color: colors.ink },
+  critDetail: { fontFamily: fonts.mono, fontSize: 10, color: colors.inkSoft, marginLeft: "auto" },
+  levelEmpty: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: colors.inkSoft,
+    marginTop: spacing.md,
+    lineHeight: 16,
+  },
+  noteBlock: {
+    marginTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    paddingTop: spacing.sm,
+  },
+  noteLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    color: colors.inkSoft,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  noteText: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.ink,
+    marginTop: 4,
+    lineHeight: 17,
+  },
 });

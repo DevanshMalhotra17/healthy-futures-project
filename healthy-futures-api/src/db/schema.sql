@@ -58,3 +58,45 @@ CREATE TABLE IF NOT EXISTS checkins (
 );
 
 CREATE INDEX IF NOT EXISTS idx_checkins_user ON checkins(user_id, checked_in_at DESC);
+
+-- At-home fitness and healthy-habit log, one row per student per calendar day.
+-- Columns mirror the program's printed routine: 4 fitness items, 4 habits.
+-- log_date is a DATE (not a timestamp) so "today" is one row you can upsert.
+CREATE TABLE IF NOT EXISTS routine_logs (
+  user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  log_date       DATE NOT NULL DEFAULT CURRENT_DATE,
+  active_play    BOOLEAN NOT NULL DEFAULT false,
+  ball_control   BOOLEAN NOT NULL DEFAULT false,
+  touches        BOOLEAN NOT NULL DEFAULT false,
+  stretch        BOOLEAN NOT NULL DEFAULT false,
+  fruits_veggies BOOLEAN NOT NULL DEFAULT false,
+  water          BOOLEAN NOT NULL DEFAULT false,
+  breakfast      BOOLEAN NOT NULL DEFAULT false,
+  sleep          BOOLEAN NOT NULL DEFAULT false,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, log_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_routine_logs_user_date
+  ON routine_logs(user_id, log_date DESC);
+
+-- Coach's assessment of the level-up criteria, one row per student per month.
+-- Attendance is deliberately absent: it is derived from `checkins` so it can't
+-- drift from the attendance the app already reports.
+CREATE TABLE IF NOT EXISTS criteria_ratings (
+  student_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  period      DATE NOT NULL,
+  rated_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+  attitude    BOOLEAN NOT NULL DEFAULT false,
+  effort      BOOLEAN NOT NULL DEFAULT false,
+  coachability BOOLEAN NOT NULL DEFAULT false,
+  skill       BOOLEAN NOT NULL DEFAULT false,
+  character   BOOLEAN NOT NULL DEFAULT false,
+  academics   BOOLEAN NOT NULL DEFAULT false,
+  note        TEXT,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (student_id, period)
+);
+
+CREATE INDEX IF NOT EXISTS idx_criteria_student_period
+  ON criteria_ratings(student_id, period DESC);

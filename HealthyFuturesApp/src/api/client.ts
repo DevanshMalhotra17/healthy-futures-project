@@ -67,6 +67,17 @@ export async function apiPost<TResponse>(
   return request<TResponse>(path, { method: "POST", headers, body: JSON.stringify(body) });
 }
 
+export async function apiPut<TResponse>(
+  path: string,
+  body: unknown,
+  token?: string | null
+): Promise<TResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  return request<TResponse>(path, { method: "PUT", headers, body: JSON.stringify(body) });
+}
+
 export async function apiGet<TResponse>(path: string, token?: string | null): Promise<TResponse> {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;

@@ -57,17 +57,6 @@ export const agenda: AgendaItem[] = [
   },
 ];
 
-export type Criterion = { label: string; met: boolean };
-
-export const criteria: Criterion[] = [
-  { label: "Attendance 90%+", met: true },
-  { label: "Positive attitude", met: true },
-  { label: "Effort every session", met: true },
-  { label: "Coachability", met: false },
-  { label: "Skill development", met: true },
-  { label: "Character", met: true },
-  { label: "Academic responsibility", met: false },
-];
 
 export const soccerScorecard = {
   opponent: "Aug 9 vs. Ewing Rec",

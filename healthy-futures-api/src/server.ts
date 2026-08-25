@@ -7,6 +7,8 @@ import authRoutes from "./routes/auth";
 import coachRoutes from "./routes/coach";
 import messagesRoutes from "./routes/messages";
 import checkinsRoutes from "./routes/checkins";
+import routinesRoutes from "./routes/routines";
+import criteriaRoutes from "./routes/criteria";
 import { errorHandler, notFoundHandler } from "./middleware/errors";
 import { assertAuthConfig } from "./middleware/auth";
 import { pool } from "./db/pool";
@@ -55,6 +57,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/coach", coachRoutes);
 app.use("/api/messages", messageLimiter, messagesRoutes);
 app.use("/api/checkins", checkinsRoutes);
+app.use("/api/routines", routinesRoutes);
+app.use("/api/criteria", criteriaRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
