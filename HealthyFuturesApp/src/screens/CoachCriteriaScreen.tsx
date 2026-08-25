@@ -11,7 +11,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing, fonts } from "@/theme";
 import { useAuth } from "@/state/AuthContext";
-import { getRoster, RosterStudent } from "@/api/coach";
+import {
+  getRoster,
+  getStudentActivity,
+  RosterStudent,
+  ActivityEntry,
+  ActivitySummary,
+  COMPANION_LABELS,
+} from "@/api/coach";
 import { getCriteria, rateCriteria, CriteriaCard, RatedCriterion } from "@/api/criteria";
 import { getHistory, FITNESS_DAYS_TARGET } from "@/api/routines";
 import { CheckIcon } from "@/components/Icons";
@@ -24,6 +31,8 @@ export default function CoachCriteriaScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [card, setCard] = useState<CriteriaCard | null>(null);
   const [routine, setRoutine] = useState<{ fitness_days_this_week: number; habit_streak: number } | null>(null);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [summary, setSummary] = useState<ActivitySummary[]>([]);
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingCard, setLoadingCard] = useState(false);
@@ -48,9 +57,10 @@ export default function CoachCriteriaScreen() {
     if (!token || !selectedId) return;
     setLoadingCard(true);
     try {
-      const [criteria, history] = await Promise.all([
+      const [criteria, history, companion] = await Promise.all([
         getCriteria(selectedId, token),
         getHistory(selectedId, token).catch(() => null),
+        getStudentActivity(selectedId, token).catch(() => null),
       ]);
       setCard(criteria);
       setNote(criteria.note ?? "");
@@ -59,6 +69,8 @@ export default function CoachCriteriaScreen() {
           ? { fitness_days_this_week: history.fitness_days_this_week, habit_streak: history.habit_streak }
           : null
       );
+      setActivity(companion?.activity ?? []);
+      setSummary(companion?.summary ?? []);
       setError(null);
     } catch {
       setError("Couldn't load that student's progress.");
@@ -249,6 +261,56 @@ export default function CoachCriteriaScreen() {
                 <Text style={styles.saveBtnText}>Save note</Text>
               )}
             </Pressable>
+
+            <Text style={styles.noteLabel}>Companion activity</Text>
+            {summary.length === 0 ? (
+              <Text style={styles.activityEmpty}>
+                {selected?.fullName?.split(/\s+/)[0] ?? "This student"} hasn't used the
+                companions yet.
+              </Text>
+            ) : (
+              <>
+                <View style={styles.summaryRow}>
+                  {summary.map((s) => (
+                    <View style={styles.summaryPill} key={s.companion}>
+                      <Text style={styles.summaryPillValue}>
+                        {s.avgScore === null ? s.uses : `${s.avgScore}`}
+                        {s.avgScore !== null && <Text style={styles.summaryPillUnit}>/100</Text>}
+                      </Text>
+                      <Text style={styles.summaryPillLabel}>
+                        {COMPANION_LABELS[s.companion]}
+                      </Text>
+                      <Text style={styles.summaryPillMeta}>
+                        {s.uses} use{s.uses === 1 ? "" : "s"}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={{ marginTop: spacing.sm }}>
+                  {activity.slice(0, 8).map((a) => (
+                    <View style={styles.activityRow} key={a.id}>
+                      <Text style={styles.activityCompanion}>
+                        {COMPANION_LABELS[a.companion]}
+                      </Text>
+                      <View style={{ flex: 1 }}>
+                        {a.detail && (
+                          <Text style={styles.activityDetail} numberOfLines={1}>
+                            {a.detail}
+                          </Text>
+                        )}
+                        <Text style={styles.activityDate}>
+                          {new Date(a.createdAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                      {a.score !== null && (
+                        <Text style={styles.activityScore}>{a.score}</Text>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
           </>
         )}
       </View>
@@ -371,4 +433,45 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   saveBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 13, color: colors.white },
+
+  activityEmpty: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.inkSoft,
+    marginTop: 8,
+    lineHeight: 17,
+  },
+  summaryRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: 10 },
+  summaryPill: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    minWidth: 82,
+  },
+  summaryPillValue: { fontFamily: fonts.mono, fontSize: 16, color: colors.pitch },
+  summaryPillUnit: { fontSize: 9.5, color: colors.inkSoft },
+  summaryPillLabel: { fontFamily: fonts.bodyBold, fontSize: 11, color: colors.ink, marginTop: 2 },
+  summaryPillMeta: { fontFamily: fonts.body, fontSize: 9.5, color: colors.inkSoft, marginTop: 1 },
+
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  activityCompanion: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    color: colors.inkSoft,
+    textTransform: "uppercase",
+    width: 64,
+  },
+  activityDetail: { fontFamily: fonts.body, fontSize: 12, color: colors.ink },
+  activityDate: { fontFamily: fonts.body, fontSize: 10, color: colors.inkSoft, marginTop: 1 },
+  activityScore: { fontFamily: fonts.mono, fontSize: 14, color: colors.pitch },
 });

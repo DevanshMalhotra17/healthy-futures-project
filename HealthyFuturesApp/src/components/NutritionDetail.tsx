@@ -1,13 +1,20 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, TextInput, Pressable, ActivityIndicator } from "react-native";
 import { colors, radius, fonts } from "@/theme";
-import { getRecipeCompatibility, RecipeCompatibilityResponse } from "@/api/nutrition";
+import {
+  getRecipeCompatibility,
+  RecipeCompatibilityResponse,
+  MEAL_TYPES,
+  MealType,
+} from "@/api/nutrition";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/state/AuthContext";
 
 export default function NutritionDetail() {
   const { token } = useAuth();
   const [recipeText, setRecipeText] = useState("");
+  const [mealType, setMealType] = useState<MealType | null>(null);
+  const [snackTime, setSnackTime] = useState("");
   const [servings, setServings] = useState("");
   const [age, setAge] = useState("");
   const [allergies, setAllergies] = useState("");
@@ -30,6 +37,9 @@ export default function NutritionDetail() {
           age: Number.isFinite(ageValue) && ageValue > 0 ? ageValue : undefined,
           allergies: allergies.trim() || undefined,
           is_athlete: true,
+          meal_type: mealType ?? undefined,
+          snack_time:
+            mealType === "snack" && snackTime.trim() ? snackTime.trim() : undefined,
         },
         token
       );
@@ -58,6 +68,35 @@ export default function NutritionDetail() {
         value={recipeText}
         onChangeText={setRecipeText}
       />
+
+      <Text style={styles.fieldLabel}>Which meal?</Text>
+      <View style={styles.chipWrap}>
+        {MEAL_TYPES.map((m) => {
+          const active = m.key === mealType;
+          return (
+            <Pressable
+              key={m.key}
+              style={[styles.chip, active && styles.chipActive]}
+              onPress={() => setMealType(active ? null : m.key)}
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{m.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {mealType === "snack" && (
+        <>
+          <Text style={styles.fieldLabel}>What time?</Text>
+          <TextInput
+            style={styles.smallInput}
+            value={snackTime}
+            onChangeText={setSnackTime}
+            placeholder="4pm"
+            placeholderTextColor="rgba(255,255,255,0.4)"
+          />
+        </>
+      )}
 
       <View style={styles.fieldRow}>
         <View style={{ flex: 1 }}>
@@ -115,6 +154,12 @@ export default function NutritionDetail() {
               <Text style={styles.scoreLabel}>/ 100 health score</Text>
             </View>
           )}
+          {result.timing_note && (
+            <Text style={styles.detailLine}>
+              <Text style={styles.detailLabel}>Timing: </Text>
+              {result.timing_note}
+            </Text>
+          )}
           {result.recommended_portion && (
             <Text style={styles.detailLine}>
               <Text style={styles.detailLabel}>Portion: </Text>
@@ -153,6 +198,16 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   fieldRow: { flexDirection: "row", gap: 10 },
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  chipActive: { backgroundColor: colors.gold },
+  chipText: { fontFamily: fonts.bodyBold, fontSize: 11.5, color: "rgba(255,255,255,0.85)" },
+  chipTextActive: { color: "#3B2A05" },
   fieldLabel: {
     fontFamily: fonts.mono,
     fontSize: 9.5,

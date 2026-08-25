@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { pool } from "../db/pool";
 import { requireAuth, requireRole } from "../middleware/auth";
-import { asyncHandler } from "../middleware/errors";
+import { asyncHandler, isUuid, HttpError } from "../middleware/errors";
 
 const router = Router();
 
@@ -97,6 +97,66 @@ router.get(
           criteriaMetCount: r.criteria_met_count,
         };
       }),
+    });
+  })
+);
+
+// A student's companion history, for the coach. Students read their own via
+// each companion's endpoint; this is the cross-companion roll-up.
+router.get(
+  "/student-activity",
+  requireAuth,
+  requireRole("coach"),
+  asyncHandler(async (req, res) => {
+    const studentId = req.query.student_id;
+    if (!isUuid(studentId)) {
+      throw new HttpError(400, "student_id must be a valid id.");
+    }
+
+    const link = await pool.query(
+      "SELECT 1 FROM coach_student_links WHERE coach_id = $1 AND student_id = $2",
+      [req.user!.userId, studentId]
+    );
+    if (link.rows.length === 0) {
+      throw new HttpError(403, "That student is not on your roster.");
+    }
+
+    const activity = await pool.query(
+      `SELECT id, companion, score, detail, created_at
+       FROM companion_activity
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [studentId]
+    );
+
+    // Per-companion rollup so the coach sees engagement at a glance.
+    const summary = await pool.query(
+      `SELECT companion,
+              COUNT(*)::int AS uses,
+              ROUND(AVG(score))::int AS avg_score,
+              MAX(created_at) AS last_used
+       FROM companion_activity
+       WHERE user_id = $1
+       GROUP BY companion
+       ORDER BY last_used DESC`,
+      [studentId]
+    );
+
+    res.json({
+      activity: activity.rows.map((r) => ({
+        id: r.id,
+        companion: r.companion,
+        score: r.score,
+        detail: r.detail,
+        createdAt: r.created_at,
+      })),
+      summary: summary.rows.map((r) => ({
+        companion: r.companion,
+        uses: r.uses,
+        avgScore: r.avg_score,
+        lastUsed: r.last_used,
+      })),
     });
   })
 );

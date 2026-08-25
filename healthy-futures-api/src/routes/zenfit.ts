@@ -3,6 +3,7 @@ import { pool } from "../db/pool";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler, HttpError } from "../middleware/errors";
 import { getClient, isConfigured, MODEL } from "../services/anthropic";
+import { logCompanionUse } from "../services/activity";
 
 const router = Router();
 
@@ -109,6 +110,12 @@ router.post(
        RETURNING id, mood, energy, note, reply, created_at`,
       [req.user!.userId, moodValue, energyValue, noteValue, reply]
     );
+
+    // Energy is 1-5; scale to 0-100 so the coach view can compare across companions.
+    await logCompanionUse(req.user!.userId, "zenfit", {
+      score: energyValue * 20,
+      detail: `Feeling ${moodValue}, energy ${energyValue}/5`,
+    });
 
     res.json({ checkin: result.rows[0] });
   })

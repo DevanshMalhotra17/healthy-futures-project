@@ -155,3 +155,18 @@ CREATE TABLE IF NOT EXISTS zenfit_checkins (
 
 CREATE INDEX IF NOT EXISTS idx_zenfit_user
   ON zenfit_checkins(user_id, created_at DESC);
+
+-- One row per companion use, so a coach can see what a student has been doing
+-- without reaching into each companion's own table. `score` is normalized to
+-- 0-100 where the companion produces one; `detail` is a short human summary.
+CREATE TABLE IF NOT EXISTS companion_activity (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  companion  TEXT NOT NULL CHECK (companion IN ('nutrition', 'primefit', 'zenfit', 'soccer')),
+  score      INTEGER,
+  detail     TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_companion_activity_user
+  ON companion_activity(user_id, created_at DESC);

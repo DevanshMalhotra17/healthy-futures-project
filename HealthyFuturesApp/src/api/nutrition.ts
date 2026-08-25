@@ -1,5 +1,15 @@
 import { apiPost } from "./client";
 
+export const MEAL_TYPES = [
+  { key: "breakfast", label: "Breakfast" },
+  { key: "brunch", label: "Brunch" },
+  { key: "lunch", label: "Lunch" },
+  { key: "dinner", label: "Dinner" },
+  { key: "snack", label: "Snack" },
+] as const;
+
+export type MealType = (typeof MEAL_TYPES)[number]["key"];
+
 export type RecipeCompatibilityRequest = {
   recipe_text: string;
   servings?: number;
@@ -8,6 +18,9 @@ export type RecipeCompatibilityRequest = {
   allergies?: string;
   is_athlete?: boolean;
   dietary_preference?: string;
+  meal_type?: MealType;
+  // Only meaningful when meal_type is "snack".
+  snack_time?: string;
 };
 
 export type NutritionInfo = Record<string, number | string | null>;
@@ -18,6 +31,7 @@ export type RecipeCompatibilityResponse = {
   health_score?: number | null;
   nutrition?: NutritionInfo | null;
   recommended_portion?: string | null;
+  timing_note?: string | null;
   disease_suitability?: DiseaseRating | null;
   ingredient_benefits: IngredientBenefit[];
   ingredient_substitutions: (string | Record<string, unknown>)[];

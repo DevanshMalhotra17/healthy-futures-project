@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../db/pool";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler, HttpError } from "../middleware/errors";
+import { logCompanionUse } from "../services/activity";
 
 const router = Router();
 
@@ -47,6 +48,12 @@ router.post(
     );
 
     const row = result.rows[0];
+
+    await logCompanionUse(req.user!.userId, "primefit", {
+      score: row.score,
+      detail: row.weakest_area ? `Focus area: ${row.weakest_area}` : null,
+    });
+
     res.json({
       success: true,
       record: {

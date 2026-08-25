@@ -24,3 +24,37 @@ export async function getRoster(token?: string | null): Promise<Roster> {
   const data = await apiGet<Roster>("/coach/roster", token);
   return { students: data.students || [], sessionsHeld: data.sessionsHeld ?? 0 };
 }
+
+export type CompanionName = "nutrition" | "primefit" | "zenfit" | "soccer";
+
+export type ActivityEntry = {
+  id: string;
+  companion: CompanionName;
+  score: number | null;
+  detail: string | null;
+  createdAt: string;
+};
+
+export type ActivitySummary = {
+  companion: CompanionName;
+  uses: number;
+  avgScore: number | null;
+  lastUsed: string;
+};
+
+export const COMPANION_LABELS: Record<CompanionName, string> = {
+  nutrition: "Nutrition",
+  primefit: "PrimeFit",
+  zenfit: "ZenFit",
+  soccer: "Soccer",
+};
+
+export async function getStudentActivity(
+  studentId: string,
+  token?: string | null
+): Promise<{ activity: ActivityEntry[]; summary: ActivitySummary[] }> {
+  return apiGet(
+    `/coach/student-activity?student_id=${encodeURIComponent(studentId)}`,
+    token
+  );
+}
