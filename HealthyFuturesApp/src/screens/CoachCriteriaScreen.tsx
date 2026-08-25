@@ -36,7 +36,7 @@ export default function CoachCriteriaScreen() {
       return;
     }
     getRoster(token)
-      .then((students) => {
+      .then(({ students }) => {
         setRoster(students);
         if (students.length > 0) setSelectedId((cur) => cur ?? students[0].id);
       })

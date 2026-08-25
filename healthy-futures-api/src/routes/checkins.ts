@@ -1,15 +1,20 @@
 import { Router } from "express";
 import { pool } from "../db/pool";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRole } from "../middleware/auth";
 import { asyncHandler, isUuid, HttpError } from "../middleware/errors";
 
 const router = Router();
 
 const MAX_SESSION_LABEL = 200;
 
+// Attendance is taken by the coach, never self-reported: a student marking
+// their own attendance would make the figure meaningless, and attendance feeds
+// the level-up criteria. Prefer PUT /sessions/:id/attendance, which ties the
+// record to a real session; this endpoint covers ad-hoc labels.
 router.post(
   "/",
   requireAuth,
+  requireRole("coach"),
   asyncHandler(async (req, res) => {
     const { session_label, student_id } = req.body || {};
     const label = String(session_label ?? "").trim();
@@ -19,31 +24,23 @@ router.post(
     if (label.length > MAX_SESSION_LABEL) {
       throw new HttpError(400, `session_label must be ${MAX_SESSION_LABEL} characters or fewer.`);
     }
+    if (!isUuid(student_id)) {
+      throw new HttpError(400, "student_id must be a valid id.");
+    }
 
-    let targetUserId = req.user!.userId;
-
-    if (student_id !== undefined && student_id !== null && student_id !== "") {
-      if (req.user!.role !== "coach") {
-        throw new HttpError(403, "Only a coach can check in another user.");
-      }
-      if (!isUuid(student_id)) {
-        throw new HttpError(400, "student_id must be a valid id.");
-      }
-      const link = await pool.query(
-        "SELECT 1 FROM coach_student_links WHERE coach_id = $1 AND student_id = $2",
-        [req.user!.userId, student_id]
-      );
-      if (link.rows.length === 0) {
-        throw new HttpError(403, "That student is not on your roster.");
-      }
-      targetUserId = student_id;
+    const link = await pool.query(
+      "SELECT 1 FROM coach_student_links WHERE coach_id = $1 AND student_id = $2",
+      [req.user!.userId, student_id]
+    );
+    if (link.rows.length === 0) {
+      throw new HttpError(403, "That student is not on your roster.");
     }
 
     const result = await pool.query(
       `INSERT INTO checkins (user_id, session_label)
        VALUES ($1, $2)
        RETURNING id, session_label, checked_in_at`,
-      [targetUserId, label]
+      [student_id, label]
     );
     res.json({ checkin: result.rows[0] });
   })

@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiGet } from "./client";
 
 export type RosterStudent = {
   id: string;
@@ -7,17 +7,20 @@ export type RosterStudent = {
   linkedAt: string;
   checkinsLast30Days: number;
   lastCheckinAt: string | null;
+  sessionsAttended: number;
+  sessionsHeld: number;
+  // null when the coach hasn't held any sessions yet, so the UI can show "—"
+  // instead of a misleading 0%.
+  attendancePct: number | null;
+  fitnessDaysThisWeek: number;
+  routineDaysLast7: number;
+  criteriaRated: boolean;
+  criteriaMetCount: number;
 };
 
-export async function getRoster(token?: string | null): Promise<RosterStudent[]> {
-  const data = await apiGet<{ students: RosterStudent[] }>("/coach/roster", token);
-  return data.students || [];
-}
+export type Roster = { students: RosterStudent[]; sessionsHeld: number };
 
-export async function checkInStudent(
-  studentId: string,
-  sessionLabel: string,
-  token?: string | null
-): Promise<void> {
-  await apiPost("/checkins", { student_id: studentId, session_label: sessionLabel }, token);
+export async function getRoster(token?: string | null): Promise<Roster> {
+  const data = await apiGet<Roster>("/coach/roster", token);
+  return { students: data.students || [], sessionsHeld: data.sessionsHeld ?? 0 };
 }

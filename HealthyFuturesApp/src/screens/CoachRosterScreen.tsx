@@ -5,27 +5,24 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Pressable,
   RefreshControl,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing, fonts } from "@/theme";
 import { useAuth } from "@/state/AuthContext";
-import { getRoster, checkInStudent, RosterStudent } from "@/api/coach";
-import { fullSchedule } from "@/data/mockData";
-import { CheckIcon } from "@/components/Icons";
+import { getRoster, RosterStudent } from "@/api/coach";
+import { FITNESS_DAYS_TARGET } from "@/api/routines";
 
-type SaveState = "idle" | "saving" | "done" | "error";
+const ATTENDANCE_TARGET_PCT = 90;
 
 export default function CoachRosterScreen() {
   const insets = useSafeAreaInsets();
-  const { token } = useAuth();
+  const { token, inviteCode } = useAuth();
   const [students, setStudents] = useState<RosterStudent[]>([]);
+  const [sessionsHeld, setSessionsHeld] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [session, setSession] = useState(fullSchedule[0]?.title ?? "Training Session");
-  const [saveState, setSaveState] = useState<Record<string, SaveState>>({});
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -33,9 +30,12 @@ export default function CoachRosterScreen() {
       return;
     }
     try {
-      setStudents(await getRoster(token));
+      const result = await getRoster(token);
+      setStudents(result.students);
+      setSessionsHeld(result.sessionsHeld);
+      setError(false);
     } catch {
-      // leave list as-is; pull to refresh retries
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -51,22 +51,10 @@ export default function CoachRosterScreen() {
     setRefreshing(false);
   }
 
-  async function handleCheckIn(student: RosterStudent) {
-    if (!token) return;
-    setSaveState((s) => ({ ...s, [student.id]: "saving" }));
-    try {
-      await checkInStudent(student.id, session, token);
-      setSaveState((s) => ({ ...s, [student.id]: "done" }));
-      await load();
-    } catch {
-      setSaveState((s) => ({ ...s, [student.id]: "error" }));
-    }
-  }
-
   if (!token) {
     return (
       <View style={[styles.screen, styles.center, { paddingTop: insets.top }]}>
-        <Text style={styles.notice}>Log in from the Profile tab to manage your roster.</Text>
+        <Text style={styles.notice}>Log in from the Profile tab to see your roster.</Text>
       </View>
     );
   }
@@ -87,71 +75,94 @@ export default function CoachRosterScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <View style={styles.container}>
-        <Text style={styles.title}>Take attendance</Text>
-        <Text style={styles.subtitle}>Pick a session, then check students in.</Text>
+        <Text style={styles.title}>Roster</Text>
+        <Text style={styles.subtitle}>
+          {sessionsHeld > 0
+            ? `Attendance across ${sessionsHeld} session${sessionsHeld === 1 ? "" : "s"} held.`
+            : "Add sessions on the Schedule tab to start tracking attendance."}
+        </Text>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sessionRow}>
-          {fullSchedule.map((item) => {
-            const active = item.title === session;
-            return (
-              <Pressable
-                key={item.title}
-                style={[styles.sessionChip, active && styles.sessionChipActive]}
-                onPress={() => setSession(item.title)}
-              >
-                <Text style={[styles.sessionChipText, active && styles.sessionChipTextActive]}>
-                  {item.title}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        {error && (
+          <Text style={styles.errorText}>Couldn't load your roster — pull down to retry.</Text>
+        )}
 
         {students.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No students yet</Text>
             <Text style={styles.emptyBody}>
-              Students appear here once they sign up with your invite code.
+              Students join by signing up with your invite code
+              {inviteCode ? ` (${inviteCode})` : ""}.
             </Text>
           </View>
         ) : (
           <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
-            {students.map((s) => {
-              const state = saveState[s.id] || "idle";
-              return (
-                <View style={styles.studentItem} key={s.id}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.studentName}>{s.fullName}</Text>
-                    <Text style={styles.studentDetail}>
-                      {s.lastCheckinAt
-                        ? `Last in ${new Date(s.lastCheckinAt).toLocaleDateString()}`
-                        : "Never checked in"}
-                    </Text>
-                    {state === "error" && (
-                      <Text style={styles.errorText}>Couldn't check in — try again.</Text>
-                    )}
+            {students.map((s) => (
+              <View style={styles.card} key={s.id}>
+                <View style={styles.cardTop}>
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>{initialsOf(s.fullName)}</Text>
                   </View>
-                  <Pressable
-                    style={[styles.checkBtn, state === "done" && styles.checkBtnDone]}
-                    onPress={() => handleCheckIn(s)}
-                    disabled={state === "saving" || state === "done"}
-                  >
-                    {state === "saving" ? (
-                      <ActivityIndicator size="small" color={colors.pitch} />
-                    ) : state === "done" ? (
-                      <CheckIcon size={13} color={colors.white} />
-                    ) : (
-                      <Text style={styles.checkBtnText}>Check in</Text>
-                    )}
-                  </Pressable>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.name}>{s.fullName}</Text>
+                    <Text style={styles.email}>{s.email}</Text>
+                  </View>
+                  {s.attendancePct !== null ? (
+                    <View
+                      style={[
+                        styles.pctChip,
+                        s.attendancePct >= ATTENDANCE_TARGET_PCT
+                          ? styles.pctGood
+                          : s.attendancePct >= 50
+                          ? styles.pctMid
+                          : styles.pctLow,
+                      ]}
+                    >
+                      <Text style={styles.pctText}>{s.attendancePct}%</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.pctNone}>—</Text>
+                  )}
                 </View>
-              );
-            })}
+
+                <View style={styles.statRow}>
+                  <Stat
+                    label="Attendance"
+                    value={
+                      s.attendancePct !== null
+                        ? `${s.sessionsAttended}/${s.sessionsHeld}`
+                        : "No sessions"
+                    }
+                  />
+                  <Stat
+                    label="Fitness days"
+                    value={`${s.fitnessDaysThisWeek}/${FITNESS_DAYS_TARGET}`}
+                  />
+                  <Stat label="Criteria" value={`${s.criteriaMetCount}/6`} />
+                </View>
+              </View>
+            ))}
           </View>
         )}
       </View>
     </ScrollView>
   );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 const styles = StyleSheet.create({
@@ -166,47 +177,51 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   title: { fontFamily: fonts.display, fontSize: 23, color: colors.ink },
-  subtitle: { fontFamily: fonts.body, fontSize: 12.5, color: colors.inkSoft, marginTop: 4 },
+  subtitle: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.inkSoft,
+    marginTop: 4,
+    lineHeight: 17,
+  },
+  errorText: { fontFamily: fonts.body, fontSize: 11.5, color: colors.danger, marginTop: spacing.md },
 
-  sessionRow: { flexDirection: "row", marginTop: spacing.md },
-  sessionChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: radius.pill,
+  card: {
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.line,
-    marginRight: 8,
+    borderRadius: radius.md,
+    padding: 14,
   },
-  sessionChipActive: { backgroundColor: colors.pitch, borderColor: colors.pitch },
-  sessionChipText: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.ink },
-  sessionChipTextActive: { color: colors.white },
-
-  studentItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.sm,
-    padding: 13,
-  },
-  studentName: { fontFamily: fonts.bodyBold, fontSize: 13, color: colors.ink },
-  studentDetail: { fontFamily: fonts.body, fontSize: 11.5, color: colors.inkSoft, marginTop: 2 },
-  errorText: { fontFamily: fonts.body, fontSize: 10.5, color: colors.danger, marginTop: 4 },
-
-  checkBtn: {
-    width: 74,
-    paddingVertical: 9,
-    borderRadius: radius.pill,
-    borderWidth: 1.5,
-    borderColor: colors.pitch,
+  cardTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.skySoft,
     alignItems: "center",
     justifyContent: "center",
   },
-  checkBtnDone: { backgroundColor: colors.pitch },
-  checkBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 11, color: colors.pitch },
+  avatarText: { fontFamily: fonts.bodyExtraBold, fontSize: 13, color: "#2C5A69" },
+  name: { fontFamily: fonts.bodyBold, fontSize: 13.5, color: colors.ink },
+  email: { fontFamily: fonts.body, fontSize: 11, color: colors.inkSoft, marginTop: 2 },
+  pctChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill },
+  pctGood: { backgroundColor: colors.pitch },
+  pctMid: { backgroundColor: colors.gold },
+  pctLow: { backgroundColor: colors.danger },
+  pctText: { fontFamily: fonts.mono, fontSize: 11.5, color: colors.white },
+  pctNone: { fontFamily: fonts.mono, fontSize: 15, color: colors.inkSoft, paddingHorizontal: 10 },
+
+  statRow: {
+    flexDirection: "row",
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  stat: { flex: 1 },
+  statValue: { fontFamily: fonts.mono, fontSize: 13.5, color: colors.ink },
+  statLabel: { fontFamily: fonts.body, fontSize: 9.5, color: colors.inkSoft, marginTop: 2 },
 
   emptyCard: {
     marginTop: spacing.lg,

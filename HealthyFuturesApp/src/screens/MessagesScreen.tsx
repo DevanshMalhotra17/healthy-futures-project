@@ -45,7 +45,7 @@ export default function MessagesScreen() {
   useEffect(() => {
     if (!token || !isCoach) return;
     getRoster(token)
-      .then(setRoster)
+      .then(({ students }) => setRoster(students))
       .catch(() => setRoster([]));
   }, [token, isCoach]);
 

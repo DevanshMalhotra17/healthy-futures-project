@@ -49,15 +49,40 @@ CREATE INDEX IF NOT EXISTS idx_dm_pair ON direct_messages(
   created_at DESC
 );
 
--- Attendance check-ins for sessions.
+-- Training sessions, owned by the coach who created them. There is no seeded
+-- schedule: a new coach starts with an empty list and adds their own.
+CREATE TABLE IF NOT EXISTS sessions (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL,
+  location   TEXT,
+  starts_at  TIMESTAMPTZ NOT NULL,
+  ends_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_coach ON sessions(coach_id, starts_at DESC);
+
+-- Attendance. Recorded by the coach only; a student cannot mark themselves
+-- present. session_id is nullable so attendance logged before sessions existed
+-- is preserved rather than dropped.
 CREATE TABLE IF NOT EXISTS checkins (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id    UUID REFERENCES sessions(id) ON DELETE CASCADE,
   session_label TEXT NOT NULL,
   checked_in_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE checkins ADD COLUMN IF NOT EXISTS session_id UUID REFERENCES sessions(id) ON DELETE CASCADE;
+
 CREATE INDEX IF NOT EXISTS idx_checkins_user ON checkins(user_id, checked_in_at DESC);
+CREATE INDEX IF NOT EXISTS idx_checkins_session ON checkins(session_id);
+
+-- One attendance row per student per session, so tapping Present twice can't
+-- inflate a student's attendance percentage.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkins_unique_session
+  ON checkins(user_id, session_id) WHERE session_id IS NOT NULL;
 
 -- At-home fitness and healthy-habit log, one row per student per calendar day.
 -- Columns mirror the program's printed routine: 4 fitness items, 4 habits.

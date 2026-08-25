@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing, fonts } from "@/theme";
-import { companions, agenda } from "@/data/mockData";
+import { companions } from "@/data/mockData";
 import { PinIcon, FlameIcon, CheckIcon } from "@/components/Icons";
 import ProgressRing from "@/components/ProgressRing";
 import CompanionCard from "@/components/CompanionCard";
@@ -12,6 +12,7 @@ import { useAuth } from "@/state/AuthContext";
 import { greetingFor, firstNameOf } from "@/utils/greeting";
 import { getCriteria, CriteriaCard } from "@/api/criteria";
 import { getToday, FITNESS_DAYS_TARGET } from "@/api/routines";
+import { listSessions, TrainingSession } from "@/api/sessions";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { RootTabParamList } from "@/navigation/RootNavigator";
 
@@ -22,6 +23,7 @@ export default function HomeScreen({ navigation }: Props) {
   const { fullName, token } = useAuth();
   const [card, setCard] = useState<CriteriaCard | null>(null);
   const [routine, setRoutine] = useState<{ fitnessDays: number; streak: number } | null>(null);
+  const [upcoming, setUpcoming] = useState<TrainingSession[]>([]);
   const [loadingCard, setLoadingCard] = useState(true);
 
   const load = useCallback(async () => {
@@ -29,9 +31,10 @@ export default function HomeScreen({ navigation }: Props) {
       setLoadingCard(false);
       return;
     }
-    const [criteriaResult, routineResult] = await Promise.allSettled([
+    const [criteriaResult, routineResult, sessionsResult] = await Promise.allSettled([
       getCriteria(undefined, token),
       getToday(token),
+      listSessions(token),
     ]);
     if (criteriaResult.status === "fulfilled") setCard(criteriaResult.value);
     if (routineResult.status === "fulfilled") {
@@ -39,6 +42,15 @@ export default function HomeScreen({ navigation }: Props) {
         fitnessDays: routineResult.value.fitness_days_this_week,
         streak: routineResult.value.habit_streak,
       });
+    }
+    if (sessionsResult.status === "fulfilled") {
+      const now = Date.now();
+      setUpcoming(
+        sessionsResult.value
+          .filter((s) => new Date(s.startsAt).getTime() >= now)
+          .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
+          .slice(0, 3)
+      );
     }
     setLoadingCard(false);
   }, [token]);
@@ -124,23 +136,46 @@ export default function HomeScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* This week */}
+        {/* Coming up — real sessions from the coach's schedule */}
         <View style={styles.secLabelRow}>
-          <Text style={styles.secLabel}>This week</Text>
+          <Text style={styles.secLabel}>Coming up</Text>
+          <Text style={styles.secLink} onPress={() => navigation.navigate("Schedule")}>
+            See all
+          </Text>
         </View>
         <View style={{ gap: spacing.sm }}>
-          {agenda.map((item) => (
-            <View style={styles.agendaItem} key={item.title}>
-              <View style={styles.agendaDay}>
-                <Text style={styles.agendaDayText}>{item.day}</Text>
-                <Text style={styles.agendaDateText}>{item.date}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.agendaTitle}>{item.title}</Text>
-                <Text style={styles.agendaDetail}>{item.detail}</Text>
-              </View>
-            </View>
-          ))}
+          {upcoming.length === 0 ? (
+            <Text style={styles.levelEmpty}>
+              No sessions scheduled yet — your coach will add them.
+            </Text>
+          ) : (
+            upcoming.map((item) => {
+              const start = new Date(item.startsAt);
+              const end = item.endsAt ? new Date(item.endsAt) : null;
+              return (
+                <View style={styles.agendaItem} key={item.id}>
+                  <View style={styles.agendaDay}>
+                    <Text style={styles.agendaDayText}>
+                      {start.toLocaleDateString([], { weekday: "short" }).toUpperCase()}
+                    </Text>
+                    <Text style={styles.agendaDateText}>
+                      {start.toLocaleDateString([], { month: "short", day: "numeric" })}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.agendaTitle}>{item.title}</Text>
+                    <Text style={styles.agendaDetail}>
+                      {start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      {end
+                        ? ` – ${end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                        : ""}
+                      {item.location ? ` · ${item.location}` : ""}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
         </View>
 
         {/* Level up — coach-rated criteria, plus auto-computed attendance */}

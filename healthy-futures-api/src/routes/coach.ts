@@ -52,21 +52,51 @@ router.get(
        ORDER BY l.linked_at DESC`,
       [req.user!.userId]
     );
+
+    // Attendance is measured against sessions this coach actually held, not an
+    // assumed cadence, so a coach with no past sessions shows no percentage
+    // rather than 0%.
+    const heldResult = await pool.query(
+      `SELECT COUNT(*)::int AS held FROM sessions
+       WHERE coach_id = $1 AND starts_at <= now()`,
+      [req.user!.userId]
+    );
+    const sessionsHeld = heldResult.rows[0].held;
+
+    const attendedResult = await pool.query(
+      `SELECT c.user_id, COUNT(*)::int AS attended
+       FROM checkins c
+       JOIN sessions s ON s.id = c.session_id
+       WHERE s.coach_id = $1 AND s.starts_at <= now()
+       GROUP BY c.user_id`,
+      [req.user!.userId]
+    );
+    const attendedBy = new Map<string, number>(
+      attendedResult.rows.map((r) => [r.user_id, r.attended])
+    );
     res.json({
-      students: result.rows.map((r) => ({
-        id: r.id,
-        fullName: r.full_name,
-        email: r.email,
-        linkedAt: r.linked_at,
-        checkinsLast30Days: r.checkins_last_30_days,
-        lastCheckinAt: r.last_checkin_at,
-        fitnessDaysThisWeek: r.fitness_days_this_week,
-        routineDaysLast7: r.routine_days_last_7,
-        criteriaRated: r.criteria_rated,
-        // Attendance is the 7th criterion and is computed client-side from
-        // checkinsLast30Days, so this count covers the 6 coach-rated ones.
-        criteriaMetCount: r.criteria_met_count,
-      })),
+      sessionsHeld,
+      students: result.rows.map((r) => {
+        const attended = attendedBy.get(r.id) ?? 0;
+        return {
+          id: r.id,
+          fullName: r.full_name,
+          email: r.email,
+          linkedAt: r.linked_at,
+          checkinsLast30Days: r.checkins_last_30_days,
+          lastCheckinAt: r.last_checkin_at,
+          sessionsAttended: attended,
+          sessionsHeld,
+          attendancePct:
+            sessionsHeld > 0 ? Math.round((attended / sessionsHeld) * 100) : null,
+          fitnessDaysThisWeek: r.fitness_days_this_week,
+          routineDaysLast7: r.routine_days_last_7,
+          criteriaRated: r.criteria_rated,
+          // Attendance is the 7th criterion and is derived separately, so this
+          // count covers only the 6 coach-rated ones.
+          criteriaMetCount: r.criteria_met_count,
+        };
+      }),
     });
   })
 );

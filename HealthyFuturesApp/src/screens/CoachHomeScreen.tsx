@@ -18,21 +18,16 @@ import { greetingFor, firstNameOf } from "@/utils/greeting";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { RootTabParamList } from "@/navigation/RootNavigator";
 
-const EXPECTED_CHECKINS_PER_30_DAYS = 8;
+const ON_TRACK_PCT = 75;
+const AT_RISK_PCT = 50;
 
 type Props = BottomTabScreenProps<RootTabParamList, "Home">;
-
-function attendancePct(student: RosterStudent): number {
-  return Math.min(
-    100,
-    Math.round((student.checkinsLast30Days / EXPECTED_CHECKINS_PER_30_DAYS) * 100)
-  );
-}
 
 export default function CoachHomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { token, fullName, inviteCode } = useAuth();
   const [students, setStudents] = useState<RosterStudent[]>([]);
+  const [sessionsHeld, setSessionsHeld] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
@@ -43,7 +38,9 @@ export default function CoachHomeScreen({ navigation }: Props) {
       return;
     }
     try {
-      setStudents(await getRoster(token));
+      const roster = await getRoster(token);
+      setStudents(roster.students);
+      setSessionsHeld(roster.sessionsHeld);
       setError(false);
     } catch {
       setError(true);
@@ -63,10 +60,15 @@ export default function CoachHomeScreen({ navigation }: Props) {
   }
 
   const total = students.length;
-  const attending = students.filter((s) => attendancePct(s) >= 75).length;
-  const needsAttention = students.filter((s) => attendancePct(s) < 50);
+  // Attendance only means something once sessions have been held, so before
+  // then nobody is counted as on-track or at-risk.
+  const rated = students.filter((s) => s.attendancePct !== null);
+  const attending = rated.filter((s) => (s.attendancePct ?? 0) >= ON_TRACK_PCT).length;
+  const needsAttention = rated.filter((s) => (s.attendancePct ?? 0) < AT_RISK_PCT);
   const teamAvg =
-    total > 0 ? Math.round(students.reduce((sum, s) => sum + attendancePct(s), 0) / total) : 0;
+    rated.length > 0
+      ? Math.round(rated.reduce((sum, s) => sum + (s.attendancePct ?? 0), 0) / rated.length)
+      : 0;
 
   if (!token) {
     return (
@@ -113,15 +115,23 @@ export default function CoachHomeScreen({ navigation }: Props) {
             centerLabel="Team"
           />
           <View style={styles.teamCopy}>
-            <Text style={styles.eyebrow}>Last 30 days</Text>
+            <Text style={styles.eyebrow}>
+              {sessionsHeld > 0
+                ? `${sessionsHeld} session${sessionsHeld === 1 ? "" : "s"} held`
+                : "Attendance"}
+            </Text>
             <Text style={styles.teamHeadline}>
               {total === 0
                 ? "No students yet"
-                : `${attending} of ${total} on track`}
+                : sessionsHeld === 0
+                ? "No sessions yet"
+                : `${attending} of ${rated.length} on track`}
             </Text>
             <Text style={styles.teamSub}>
               {total === 0
                 ? "Share your invite code to add students."
+                : sessionsHeld === 0
+                ? "Add sessions on the Schedule tab, then take attendance."
                 : "Average attendance across your roster."}
             </Text>
           </View>
@@ -152,9 +162,9 @@ export default function CoachHomeScreen({ navigation }: Props) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.alertName}>{s.fullName}</Text>
                     <Text style={styles.alertDetail}>
-                      {s.checkinsLast30Days === 0
-                        ? "No check-ins in 30 days"
-                        : `Only ${s.checkinsLast30Days} check-in${s.checkinsLast30Days === 1 ? "" : "s"} in 30 days`}
+                      {s.sessionsAttended === 0
+                        ? `Missed all ${s.sessionsHeld} session${s.sessionsHeld === 1 ? "" : "s"}`
+                        : `Attended ${s.sessionsAttended} of ${s.sessionsHeld} sessions`}
                     </Text>
                   </View>
                   <Pressable
@@ -185,7 +195,7 @@ export default function CoachHomeScreen({ navigation }: Props) {
         ) : (
           <View style={{ gap: spacing.sm }}>
             {students.map((s) => {
-              const pct = attendancePct(s);
+              const pct = s.attendancePct;
               return (
                 <Pressable
                   style={styles.studentItem}
@@ -198,21 +208,27 @@ export default function CoachHomeScreen({ navigation }: Props) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.studentName}>{s.fullName}</Text>
                     <Text style={styles.studentDetail}>
-                      {s.checkinsLast30Days} check-in{s.checkinsLast30Days === 1 ? "" : "s"} · 30 days
+                      {pct === null
+                        ? "No sessions held yet"
+                        : `${s.sessionsAttended} of ${s.sessionsHeld} sessions`}
                     </Text>
                   </View>
-                  <View
-                    style={[
-                      styles.pctChip,
-                      pct >= 75
-                        ? styles.pctChipGood
-                        : pct >= 50
-                        ? styles.pctChipMid
-                        : styles.pctChipLow,
-                    ]}
-                  >
-                    <Text style={styles.pctChipText}>{pct}%</Text>
-                  </View>
+                  {pct === null ? (
+                    <Text style={styles.pctNone}>—</Text>
+                  ) : (
+                    <View
+                      style={[
+                        styles.pctChip,
+                        pct >= ON_TRACK_PCT
+                          ? styles.pctChipGood
+                          : pct >= AT_RISK_PCT
+                          ? styles.pctChipMid
+                          : styles.pctChipLow,
+                      ]}
+                    >
+                      <Text style={styles.pctChipText}>{pct}%</Text>
+                    </View>
+                  )}
                   <ChevronRightIcon size={15} color={colors.inkSoft} />
                 </Pressable>
               );
@@ -357,6 +373,7 @@ const styles = StyleSheet.create({
   pctChipMid: { backgroundColor: colors.gold },
   pctChipLow: { backgroundColor: colors.danger },
   pctChipText: { fontFamily: fonts.mono, fontSize: 11, color: colors.white },
+  pctNone: { fontFamily: fonts.mono, fontSize: 14, color: colors.inkSoft, paddingHorizontal: 8 },
 
   emptyCard: {
     backgroundColor: colors.card,

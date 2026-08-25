@@ -78,6 +78,16 @@ export async function apiPut<TResponse>(
   return request<TResponse>(path, { method: "PUT", headers, body: JSON.stringify(body) });
 }
 
+export async function apiDelete<TResponse>(
+  path: string,
+  token?: string | null
+): Promise<TResponse> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  return request<TResponse>(path, { method: "DELETE", headers });
+}
+
 export async function apiGet<TResponse>(path: string, token?: string | null): Promise<TResponse> {
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;

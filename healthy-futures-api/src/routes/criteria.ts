@@ -109,16 +109,32 @@ async function buildCard(studentId: string) {
   );
   const rated = ratingResult.rows[0];
 
-  const checkinResult = await pool.query(
-    `SELECT COUNT(*)::int AS c FROM checkins
-     WHERE user_id = $1 AND checked_in_at >= now() - interval '30 days'`,
+  // Measured against sessions the student's coach actually held. Falls back to
+  // an assumed cadence only when no sessions have been scheduled yet, so an
+  // empty schedule doesn't read as 0% attendance.
+  const attendanceResult = await pool.query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM sessions s
+        JOIN coach_student_links l ON l.coach_id = s.coach_id
+        WHERE l.student_id = $1 AND s.starts_at <= now()) AS held,
+       (SELECT COUNT(*)::int FROM checkins c
+        JOIN sessions s ON s.id = c.session_id
+        JOIN coach_student_links l ON l.coach_id = s.coach_id
+        WHERE c.user_id = $1 AND l.student_id = $1 AND s.starts_at <= now()) AS attended,
+       (SELECT COUNT(*)::int FROM checkins
+        WHERE user_id = $1 AND checked_in_at >= now() - interval '30 days') AS recent`,
     [studentId]
   );
-  const checkins = checkinResult.rows[0].c;
-  const attendancePct = Math.min(
-    100,
-    Math.round((checkins / EXPECTED_CHECKINS_PER_30_DAYS) * 100)
-  );
+  const { held, attended, recent } = attendanceResult.rows[0];
+
+  const attendancePct =
+    held > 0
+      ? Math.round((attended / held) * 100)
+      : Math.min(100, Math.round((recent / EXPECTED_CHECKINS_PER_30_DAYS) * 100));
+  const attendanceDetail =
+    held > 0
+      ? `${attendancePct}% · ${attended} of ${held} session${held === 1 ? "" : "s"}`
+      : `${recent} check-in${recent === 1 ? "" : "s"} in 30 days · no sessions scheduled yet`;
 
   const items = [
     {
@@ -127,7 +143,7 @@ async function buildCard(studentId: string) {
       met: attendancePct >= ATTENDANCE_TARGET_PCT,
       // Flagged so the UI can show this as measured rather than coach-assigned.
       auto: true,
-      detail: `${attendancePct}% · ${checkins} check-in${checkins === 1 ? "" : "s"} in 30 days`,
+      detail: attendanceDetail,
     },
     ...RATED_CRITERIA.map((key) => ({
       key,

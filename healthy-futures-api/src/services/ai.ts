@@ -111,19 +111,27 @@ function getTools(role: "coach" | "student") {
         },
       },
     },
-    {
+  ];
+
+  if (role === "coach") {
+    tools.push({
       name: "check_in",
-      description: "Check in a student for a session/practice",
+      description:
+        "Mark a student present for a session. Coach-only: students cannot mark " +
+        "their own attendance.",
       input_schema: {
         type: "object",
         properties: {
-          session_label: { type: "string", description: "Name of the session (e.g. 'Soccer Training - Thursday')" },
-          student_name: { type: "string", description: "Name of the student to check in (coaches only)" },
+          session_label: {
+            type: "string",
+            description: "Which session, e.g. 'Soccer Training' or 'Thursday'",
+          },
+          student_name: { type: "string", description: "Name of the student to mark present" },
         },
-        required: ["session_label"],
+        required: ["session_label", "student_name"],
       },
-    },
-  ];
+    });
+  }
 
   if (role === "student") {
     tools.push(
@@ -285,9 +293,13 @@ The at-home routine is 4 fitness items (30-45 min active play, 20 min ball contr
 50-100 touches each foot, stretching) done 3-5 days a week, plus 4 daily habits
 (fruits & vegetables, water over sugary drinks, healthy breakfast, 8-10 hours sleep).
 
-The 7 level-up criteria are attendance (90%+, computed from check-ins), positive attitude,
-effort, coachability, skill development, character, and academic responsibility.
-${role === "coach" ? "You may rate the 6 non-attendance criteria." : "Only your coach can rate criteria."}
+The 7 level-up criteria are attendance (90%+, computed from sessions attended), positive
+attitude, effort, coachability, skill development, character, and academic responsibility.
+${
+  role === "coach"
+    ? "You may rate the 6 non-attendance criteria and mark students present for sessions."
+    : "Only your coach can rate criteria and mark attendance — never offer to do either."
+}
 
 Be concise, friendly, and encouraging. Keep replies to 1-3 sentences unless asked for detail.
 You are talking to a young athlete or their coach, so avoid medical or dietary claims.`;
@@ -380,30 +392,68 @@ async function checkIn(
   studentName: string | undefined,
   context: UserContext
 ): Promise<string> {
-  let targetId = context.userId;
-  let targetName = context.fullName;
-
-  if (studentName && role === "coach") {
-    const match = context.roster.find(s =>
-      s.full_name.toLowerCase().includes(studentName.toLowerCase())
+  // Attendance is the coach's record. Students can't mark themselves present —
+  // self-reported attendance would make the level-up criterion meaningless.
+  if (role !== "coach") {
+    return (
+      "Only your coach can mark attendance. If you were at a session and it's not " +
+      "showing, message your coach and they'll sort it out."
     );
-    if (!match) {
-      return `I couldn't find a student named "${studentName}" on your roster. Your students: ${context.roster.map(s => s.full_name).join(", ")}.`;
-    }
-    targetId = match.id;
-    targetName = match.full_name;
   }
 
-  if (role === "student" && studentName) {
-    return "Students can only check themselves in.";
+  if (!studentName) {
+    return `Who should I mark present? For example "check ${
+      context.roster[0]?.full_name.split(" ")[0] ?? "Marcus"
+    } in for Thursday".`;
   }
 
-  await pool.query(
-    "INSERT INTO checkins (user_id, session_label) VALUES ($1, $2)",
-    [targetId, sessionLabel]
+  const match = findStudent(studentName, context);
+  if (!match) {
+    return `I couldn't find a student named "${studentName}" on your roster. Your students: ${
+      context.roster.length ? context.roster.map((s) => s.full_name).join(", ") : "none yet"
+    }.`;
+  }
+
+  // Attach to a real session when one plausibly matches, so the attendance
+  // percentage on the roster counts it.
+  const session = await matchSession(context.userId, sessionLabel);
+  if (session) {
+    await pool.query(
+      `INSERT INTO checkins (user_id, session_id, session_label, checked_in_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, session_id) WHERE session_id IS NOT NULL DO NOTHING`,
+      [match.id, session.id, session.title, session.starts_at]
+    );
+    return `✅ **Marked present:** ${match.full_name} for "${session.title}" on ${new Date(
+      session.starts_at
+    ).toLocaleDateString()}.`;
+  }
+
+  await pool.query("INSERT INTO checkins (user_id, session_label) VALUES ($1, $2)", [
+    match.id,
+    sessionLabel,
+  ]);
+  return (
+    `✅ **Marked present:** ${match.full_name} for "${sessionLabel}".\n` +
+    "This isn't tied to a scheduled session, so it won't count toward the attendance " +
+    "percentage. Add the session on the Schedule tab to track it."
   );
+}
 
-  return `✅ **Checked in!** ${targetName} is now marked present for "${sessionLabel}".`;
+// Looks for the coach's nearest session matching the label, else the closest
+// upcoming or most recent one.
+async function matchSession(coachId: string, label: string) {
+  const cleaned = label.replace(/^Training Session\s*—\s*/i, "").trim();
+  const result = await pool.query(
+    `SELECT id, title, starts_at FROM sessions
+     WHERE coach_id = $1
+       AND ($2 = '' OR title ILIKE '%' || $2 || '%'
+            OR to_char(starts_at, 'FMDay') ILIKE $2 || '%')
+     ORDER BY ABS(EXTRACT(EPOCH FROM (starts_at - now())))
+     LIMIT 1`,
+    [coachId, cleaned]
+  );
+  return result.rows[0] ?? null;
 }
 
 const ROUTINE_LABELS: Record<RoutineField, string> = {
@@ -670,15 +720,14 @@ function handleLocally(
 
   const help =
     role === "coach"
-      ? '• **Check-ins** — "check Marcus in for Thursday"\n' +
+      ? '• **Attendance** — "mark Marcus present for Thursday"\n' +
         '• **Ratings** — "Marcus meets coachability"\n' +
         '• **Routine** — "how is Marcus doing at home?"\n' +
         '• **Roster** — "show my roster"\n' +
         '• **Score** — "score for Marcus"'
       : '• **Routine** — "log 100 touches" or "I stretched and drank water"\n' +
         '• **Progress** — "how\'s my routine?" or "how\'s my score looking?"\n' +
-        '• **Nutrition** — "try veggie soup"\n' +
-        '• **Check-ins** — "check me in for Soccer Training"';
+        '• **Nutrition** — "try veggie soup"';
 
   return Promise.resolve(`Hey ${context.fullName}! I can help with:\n${help}\n\nWhat would you like to do?`);
 }
