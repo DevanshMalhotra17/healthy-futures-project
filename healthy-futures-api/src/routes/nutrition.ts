@@ -16,7 +16,7 @@ router.post(
   asyncHandler(async (req, res) => {
     // Validate the request before reporting server configuration, so a
     // malformed request gets a useful 400 either way.
-    const { recipe_text, servings, allergies } = req.body || {};
+    const { recipe_text, servings, allergies, age, dietary_preference } = req.body || {};
     const text = String(recipe_text ?? "").trim();
     if (!text) {
       throw new HttpError(400, "recipe_text is required.");
@@ -31,6 +31,11 @@ router.post(
       throw new HttpError(400, "servings must be a positive number.");
     }
 
+    const ageValue = age === undefined || age === null ? undefined : Number(age);
+    if (ageValue !== undefined && (!Number.isFinite(ageValue) || ageValue < 5 || ageValue > 120)) {
+      throw new HttpError(400, "age must be a realistic number.");
+    }
+
     if (!isConfigured()) {
       throw new HttpError(
         503,
@@ -40,7 +45,12 @@ router.post(
 
     const analysis = await analyzeRecipe(text, {
       servings: servingCount,
+      age: ageValue,
       allergies: allergies === undefined || allergies === null ? undefined : String(allergies),
+      dietaryPreference:
+        dietary_preference === undefined || dietary_preference === null
+          ? undefined
+          : String(dietary_preference),
     });
 
     res.json(analysis);

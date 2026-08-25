@@ -8,6 +8,9 @@ import { useAuth } from "@/state/AuthContext";
 export default function NutritionDetail() {
   const { token } = useAuth();
   const [recipeText, setRecipeText] = useState("");
+  const [servings, setServings] = useState("");
+  const [age, setAge] = useState("");
+  const [allergies, setAllergies] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RecipeCompatibilityResponse | null>(null);
@@ -18,7 +21,18 @@ export default function NutritionDetail() {
     setError(null);
     setResult(null);
     try {
-      const response = await getRecipeCompatibility({ recipe_text: recipeText.trim() }, token);
+      const servingCount = Number.parseInt(servings, 10);
+      const ageValue = Number.parseInt(age, 10);
+      const response = await getRecipeCompatibility(
+        {
+          recipe_text: recipeText.trim(),
+          servings: Number.isFinite(servingCount) && servingCount > 0 ? servingCount : undefined,
+          age: Number.isFinite(ageValue) && ageValue > 0 ? ageValue : undefined,
+          allergies: allergies.trim() || undefined,
+          is_athlete: true,
+        },
+        token
+      );
       setResult(response);
     } catch (e) {
       const message =
@@ -43,6 +57,40 @@ export default function NutritionDetail() {
         multiline
         value={recipeText}
         onChangeText={setRecipeText}
+      />
+
+      <View style={styles.fieldRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.fieldLabel}>Servings</Text>
+          <TextInput
+            style={styles.smallInput}
+            value={servings}
+            onChangeText={setServings}
+            placeholder="1"
+            placeholderTextColor="rgba(255,255,255,0.4)"
+            keyboardType="number-pad"
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.fieldLabel}>Your age</Text>
+          <TextInput
+            style={styles.smallInput}
+            value={age}
+            onChangeText={setAge}
+            placeholder="14"
+            placeholderTextColor="rgba(255,255,255,0.4)"
+            keyboardType="number-pad"
+          />
+        </View>
+      </View>
+
+      <Text style={styles.fieldLabel}>Allergies or foods to avoid</Text>
+      <TextInput
+        style={styles.smallInput}
+        value={allergies}
+        onChangeText={setAllergies}
+        placeholder="peanuts, dairy — leave blank if none"
+        placeholderTextColor="rgba(255,255,255,0.4)"
       />
 
       <Pressable
@@ -103,6 +151,25 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 13,
     textAlignVertical: "top",
+  },
+  fieldRow: { flexDirection: "row", gap: 10 },
+  fieldLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    color: "rgba(255,255,255,0.6)",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginTop: 12,
+  },
+  smallInput: {
+    marginTop: 6,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: colors.white,
+    fontFamily: fonts.body,
+    fontSize: 13,
   },
   button: {
     marginTop: 12,

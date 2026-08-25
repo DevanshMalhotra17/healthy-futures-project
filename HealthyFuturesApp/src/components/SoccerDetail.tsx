@@ -1,190 +1,336 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { colors, radius, fonts } from "@/theme";
-import { useAuth } from "@/state/AuthContext";
-import { listTraceSessions, sendTraceChat, TraceSession, TraceChatMessage } from "@/api/trace";
-import { ApiError } from "@/api/client";
+import {
+  uploadClip,
+  getStatus,
+  resultUrl,
+  SOCCER_MODES,
+  SoccerMode,
+  SoccerError,
+  MAX_VIDEO_BYTES,
+} from "@/api/soccer";
+
+const POLL_MS = 4000;
+
+type Phase = "idle" | "uploading" | "processing" | "done" | "error";
+type Picked = { uri: string; name: string; mimeType?: string | null; size?: number };
 
 export default function SoccerDetail() {
-  const { token } = useAuth();
-  const [sessions, setSessions] = useState<TraceSession[] | null>(null);
-  const [loadingSessions, setLoadingSessions] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<TraceSession | null>(null);
+  const [mode, setMode] = useState<SoccerMode>("RADAR");
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const [history, setHistory] = useState<TraceChatMessage[]>([]);
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
+  const player = useVideoPlayer(
+    phase === "done" && sessionId ? resultUrl(sessionId) : null,
+    (p) => {
+      p.loop = true;
+    }
+  );
 
   useEffect(() => {
-    if (!token) return;
-    setLoadingSessions(true);
-    setLoadError(null);
-    listTraceSessions(token)
-      .then(setSessions)
-      .catch((e) => {
-        setLoadError(
-          e instanceof ApiError
-            ? `Couldn't load your sessions (${e.status}).`
-            : "Couldn't reach the soccer companion."
-        );
-      })
-      .finally(() => setLoadingSessions(false));
-  }, [token]);
+    return () => {
+      if (poll.current) clearInterval(poll.current);
+    };
+  }, []);
 
-  async function handleSend() {
-    if (!selected || !draft.trim() || sending) return;
-    const message = draft.trim();
-    setDraft("");
-    setChatError(null);
-    const nextHistory: TraceChatMessage[] = [...history, { role: "user", content: message }];
-    setHistory(nextHistory);
-    setSending(true);
+  async function choose(fromCamera: boolean) {
+    setMessage(null);
     try {
-      const res = await sendTraceChat(
-        { session_id: selected.id, message, history },
-        token
-      );
-      setHistory([...nextHistory, { role: "assistant", content: res.reply }]);
-    } catch (e) {
-      setChatError(
-        e instanceof ApiError
-          ? `The coach couldn't reply (${e.status}).`
-          : "Couldn't reach the soccer companion."
-      );
-    } finally {
-      setSending(false);
+      if (fromCamera) {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          setMessage("Camera access is needed to record a clip.");
+          return;
+        }
+      }
+      const result = fromCamera
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ["videos"], videoMaxDuration: 60 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"] });
+
+      const asset = result.canceled ? null : result.assets?.[0];
+      if (!asset?.uri) return;
+
+      if (asset.fileSize && asset.fileSize > MAX_VIDEO_BYTES) {
+        setMessage("That clip is over 450 MB. Trim it or record a shorter one.");
+        return;
+      }
+
+      stopPolling();
+      setPicked({
+        uri: asset.uri,
+        name: asset.fileName || "clip.mp4",
+        mimeType: asset.mimeType,
+        size: asset.fileSize,
+      });
+      setPhase("idle");
+      setSessionId(null);
+    } catch {
+      setMessage("Couldn't open the camera roll.");
     }
   }
 
-  if (!token) {
-    return (
-      <View style={styles.panel}>
-        <Text style={styles.title}>Soccer Scorecard</Text>
-        <Text style={styles.notice}>
-          Log in from the Profile tab to see your analyzed matches and chat with the coach.
-        </Text>
-      </View>
-    );
+  async function analyze() {
+    if (!picked || phase === "uploading" || phase === "processing") return;
+    setPhase("uploading");
+    setMessage(null);
+    setSessionId(null);
+
+    try {
+      const id = await uploadClip(picked, mode);
+      setSessionId(id);
+      setPhase("processing");
+      startPolling(id);
+    } catch (e) {
+      setPhase("error");
+      setMessage(
+        e instanceof SoccerError
+          ? e.message
+          : "Couldn't reach the analyzer. Check your connection and try again."
+      );
+    }
   }
 
-  if (!selected) {
-    return (
-      <View style={styles.panel}>
-        <Text style={styles.title}>Your matches</Text>
-        {loadingSessions && <ActivityIndicator color={colors.white} style={{ marginTop: 14 }} />}
-        {loadError && <Text style={styles.errorText}>{loadError}</Text>}
-        {!loadingSessions && sessions && sessions.length === 0 && (
-          <Text style={styles.notice}>No analyzed matches yet — check back after your next game.</Text>
-        )}
-        <View style={{ marginTop: 12, gap: 8 }}>
-          {sessions?.map((s) => (
-            <Pressable key={s.id} style={styles.sessionRow} onPress={() => setSelected(s)}>
-              <Text style={styles.sessionTeams}>
-                {s.home_team} {s.home_score ?? 0} — {s.away_score ?? 0} {s.away_team}
-              </Text>
-              <Text style={styles.sessionMeta}>
-                {s.status || "processed"}
-                {s.start_time ? ` · ${s.start_time}` : ""}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-    );
+  function startPolling(id: string) {
+    stopPolling();
+    poll.current = setInterval(async () => {
+      try {
+        const { status, error } = await getStatus(id);
+        if (status === "done") {
+          stopPolling();
+          setPhase("done");
+        } else if (status === "error") {
+          stopPolling();
+          setPhase("error");
+          // The analyzer returns a stderr tail; the first line is the useful part.
+          setMessage(error?.split("\n")[0] || "Analysis failed on the server.");
+        }
+      } catch (e) {
+        stopPolling();
+        setPhase("error");
+        setMessage(e instanceof SoccerError ? e.message : "Lost contact with the analyzer.");
+      }
+    }, POLL_MS);
   }
+
+  function stopPolling() {
+    if (poll.current) clearInterval(poll.current);
+    poll.current = null;
+  }
+
+  function reset() {
+    stopPolling();
+    setPicked(null);
+    setSessionId(null);
+    setPhase("idle");
+    setMessage(null);
+  }
+
+  const busy = phase === "uploading" || phase === "processing";
 
   return (
     <View style={styles.panel}>
-      <View style={styles.chatHeader}>
-        <Pressable onPress={() => setSelected(null)}>
-          <Text style={styles.backLink}>← All matches</Text>
-        </Pressable>
-        <Text style={styles.title}>
-          {selected.home_team} vs {selected.away_team}
-        </Text>
-      </View>
+      <Text style={styles.title}>Analyze a match clip</Text>
+      <Text style={styles.sub}>
+        Upload a clip and the analyzer marks up players, the ball, and the pitch. It runs on CPU,
+        so a short clip still takes a few minutes.
+      </Text>
 
-      <View style={styles.chatBody}>
-        {history.length === 0 && (
-          <Text style={styles.notice}>Ask the coach anything about this match.</Text>
-        )}
-        {history.map((m, i) => (
-          <View
-            key={i}
-            style={[styles.bubble, m.role === "user" ? styles.bubbleUser : styles.bubbleCoach]}
-          >
-            <Text style={styles.bubbleText}>{m.content}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modeRow}>
+        {SOCCER_MODES.map((m) => {
+          const active = m.key === mode;
+          return (
+            <Pressable
+              key={m.key}
+              style={[styles.chip, active && styles.chipActive]}
+              onPress={() => setMode(m.key)}
+              disabled={busy}
+            >
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{m.label}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <Text style={styles.modeHint}>{SOCCER_MODES.find((m) => m.key === mode)?.hint}</Text>
+
+      {!picked ? (
+        <>
+          <Pressable style={styles.pickBtn} onPress={() => choose(false)}>
+            <Text style={styles.pickBtnText}>Choose a clip</Text>
+          </Pressable>
+          <Pressable style={styles.pickBtnGhost} onPress={() => choose(true)}>
+            <Text style={styles.pickBtnGhostText}>Record one now</Text>
+          </Pressable>
+        </>
+      ) : (
+        <View style={styles.fileCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.fileName} numberOfLines={1}>
+              {picked.name}
+            </Text>
+            {picked.size ? (
+              <Text style={styles.fileMeta}>{(picked.size / 1_048_576).toFixed(1)} MB</Text>
+            ) : null}
           </View>
-        ))}
-        {sending && <ActivityIndicator color={colors.white} style={{ marginTop: 8 }} />}
-        {chatError && <Text style={styles.errorText}>{chatError}</Text>}
-      </View>
+          {!busy && (
+            <Pressable onPress={reset}>
+              <Text style={styles.changeText}>Change</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
 
-      <View style={styles.inputRow}>
-        <TextInput
-          style={styles.chatInput}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Ask about this match..."
-          placeholderTextColor="rgba(255,255,255,0.4)"
-          onSubmitEditing={handleSend}
-        />
-        <Pressable style={styles.sendBtn} onPress={handleSend} disabled={sending || !draft.trim()}>
-          <Text style={styles.sendBtnText}>Send</Text>
+      {picked && phase !== "done" && (
+        <Pressable
+          style={[styles.analyzeBtn, busy && styles.analyzeBtnBusy]}
+          onPress={analyze}
+          disabled={busy}
+        >
+          {busy ? (
+            <View style={styles.busyRow}>
+              <ActivityIndicator size="small" color={colors.white} />
+              <Text style={styles.analyzeBtnText}>
+                {phase === "uploading" ? "Uploading…" : "Analyzing…"}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.analyzeBtnText}>Analyze clip</Text>
+          )}
         </Pressable>
-      </View>
+      )}
+
+      {phase === "processing" && (
+        <Text style={styles.note}>
+          Still working. Analysis keeps running on the server, but this panel stops tracking it if
+          you close the app.
+        </Text>
+      )}
+
+      {phase === "done" && sessionId && (
+        <View style={styles.resultBlock}>
+          <Text style={styles.resultLabel}>Analysis ready</Text>
+          <VideoView player={player} style={styles.video} allowsFullscreen contentFit="contain" />
+          <Pressable style={styles.pickBtnGhost} onPress={reset}>
+            <Text style={styles.pickBtnGhostText}>Analyze another clip</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {message && (
+        <Text style={[styles.note, phase === "error" && styles.errorNote]}>{message}</Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: { backgroundColor: colors.pitchDark, borderRadius: radius.lg, padding: 20 },
-  title: { fontFamily: fonts.display, fontSize: 17, color: colors.white },
-  notice: {
+  panel: {
+    backgroundColor: colors.pitchDark,
+    borderRadius: radius.md,
+    padding: 16,
+    marginTop: -4,
+  },
+  title: { fontFamily: fonts.display, fontSize: 16, color: colors.white },
+  sub: {
     fontFamily: fonts.body,
-    fontSize: 12.5,
-    color: "rgba(255,255,255,0.75)",
-    marginTop: 10,
-    lineHeight: 18,
+    fontSize: 11.5,
+    color: "rgba(255,255,255,0.7)",
+    marginTop: 4,
+    lineHeight: 16,
   },
-  errorText: { fontFamily: fonts.body, fontSize: 12, color: "#F3B0A0", marginTop: 10, lineHeight: 17 },
 
-  sessionRow: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 12,
-    padding: 13,
-  },
-  sessionTeams: { fontFamily: fonts.bodyBold, fontSize: 13, color: colors.white },
-  sessionMeta: { fontFamily: fonts.body, fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 3 },
-
-  chatHeader: { marginBottom: 10 },
-  backLink: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.gold, marginBottom: 8 },
-
-  chatBody: { gap: 8, minHeight: 40 },
-  bubble: { borderRadius: 12, padding: 11, maxWidth: "88%" },
-  bubbleUser: { backgroundColor: colors.gold, alignSelf: "flex-end" },
-  bubbleCoach: { backgroundColor: "rgba(255,255,255,0.1)", alignSelf: "flex-start" },
-  bubbleText: { fontFamily: fonts.body, fontSize: 12.5, color: colors.white, lineHeight: 17 },
-
-  inputRow: { flexDirection: "row", gap: 8, marginTop: 14 },
-  chatInput: {
-    flex: 1,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 12,
+  modeRow: { flexDirection: "row", marginTop: 14 },
+  chip: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: colors.white,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    marginRight: 7,
+  },
+  chipActive: { backgroundColor: colors.white },
+  chipText: { fontFamily: fonts.bodyBold, fontSize: 11.5, color: "rgba(255,255,255,0.85)" },
+  chipTextActive: { color: colors.pitchDark },
+  modeHint: {
     fontFamily: fonts.body,
-    fontSize: 13,
+    fontSize: 10.5,
+    color: "rgba(255,255,255,0.6)",
+    marginTop: 7,
   },
-  sendBtn: {
-    backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingHorizontal: 16,
+
+  pickBtn: {
+    marginTop: 14,
+    backgroundColor: colors.white,
+    borderRadius: radius.pill,
+    paddingVertical: 11,
     alignItems: "center",
-    justifyContent: "center",
   },
-  sendBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 12.5, color: "#3B2A05" },
+  pickBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 12.5, color: colors.pitchDark },
+  pickBtnGhost: {
+    marginTop: 8,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.5)",
+    borderRadius: radius.pill,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  pickBtnGhostText: { fontFamily: fonts.bodyExtraBold, fontSize: 12.5, color: colors.white },
+
+  fileCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: radius.sm,
+    padding: 12,
+    marginTop: 14,
+  },
+  fileName: { fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.white },
+  fileMeta: {
+    fontFamily: fonts.mono,
+    fontSize: 10.5,
+    color: "rgba(255,255,255,0.6)",
+    marginTop: 2,
+  },
+  changeText: { fontFamily: fonts.bodyExtraBold, fontSize: 11, color: colors.white },
+
+  analyzeBtn: {
+    marginTop: 12,
+    backgroundColor: colors.pitch,
+    borderRadius: radius.pill,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  analyzeBtnBusy: { opacity: 0.85 },
+  analyzeBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 12.5, color: colors.white },
+  busyRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+
+  resultBlock: { marginTop: 14 },
+  resultLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: "rgba(255,255,255,0.7)",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  video: {
+    width: "100%",
+    height: 200,
+    marginTop: 8,
+    borderRadius: radius.sm,
+    backgroundColor: "#000",
+  },
+
+  note: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: "rgba(255,255,255,0.75)",
+    marginTop: 12,
+    lineHeight: 16,
+  },
+  errorNote: { color: "#FFC4B4" },
 });

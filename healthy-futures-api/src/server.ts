@@ -11,6 +11,8 @@ import routinesRoutes from "./routes/routines";
 import criteriaRoutes from "./routes/criteria";
 import sessionsRoutes from "./routes/sessions";
 import nutritionRoutes from "./routes/nutrition";
+import primefitRoutes from "./routes/primefit";
+import zenfitRoutes from "./routes/zenfit";
 import { errorHandler, notFoundHandler } from "./middleware/errors";
 import { assertAuthConfig } from "./middleware/auth";
 import { pool } from "./db/pool";
@@ -64,6 +66,8 @@ app.use("/api/criteria", criteriaRoutes);
 app.use("/api/sessions", sessionsRoutes);
 // The frontend's nutrition client posts to /api/recipe-recommendation.
 app.use("/api/recipe-recommendation", messageLimiter, nutritionRoutes);
+app.use("/api/primefit-results", primefitRoutes);
+app.use("/api/zenfit", messageLimiter, zenfitRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -125,3 +125,33 @@ CREATE TABLE IF NOT EXISTS criteria_ratings (
 
 CREATE INDEX IF NOT EXISTS idx_criteria_student_period
   ON criteria_ratings(student_id, period DESC);
+
+-- PrimeFit quiz results. Kept as history so progress over time is visible.
+CREATE TABLE IF NOT EXISTS primefit_results (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source         TEXT NOT NULL,
+  score          INTEGER NOT NULL,
+  strongest_area TEXT,
+  weakest_area   TEXT,
+  recommendation TEXT,
+  summary        TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_primefit_user
+  ON primefit_results(user_id, created_at DESC);
+
+-- ZenFit wellness check-ins: a short mood/energy log plus the assistant's reply.
+CREATE TABLE IF NOT EXISTS zenfit_checkins (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  mood       TEXT NOT NULL,
+  energy     INTEGER NOT NULL CHECK (energy BETWEEN 1 AND 5),
+  note       TEXT,
+  reply      TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zenfit_user
+  ON zenfit_checkins(user_id, created_at DESC);

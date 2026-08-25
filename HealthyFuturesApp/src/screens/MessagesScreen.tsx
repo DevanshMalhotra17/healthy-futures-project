@@ -23,6 +23,7 @@ import {
 } from "@/api/messages";
 import { ApiError } from "@/api/client";
 import { getRoster, RosterStudent } from "@/api/coach";
+import { coachTitle } from "@/utils/greeting";
 
 const POLL_INTERVAL_MS = 3000;
 const AI_EMAIL = "assistant@healthyfutures.app";
@@ -141,7 +142,7 @@ export default function MessagesScreen() {
     if (withEmail === AI_EMAIL) return "AI Assistant";
     const student = roster.find((s) => s.email === withEmail);
     if (student) return student.fullName;
-    if (!isCoach && coach && withEmail === coach.email) return coach.fullName;
+    if (!isCoach && coach && withEmail === coach.email) return coachTitle(coach.fullName);
     return isCoach ? withEmail : "Coach";
   }
 

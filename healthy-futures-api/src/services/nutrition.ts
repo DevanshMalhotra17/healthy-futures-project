@@ -83,7 +83,12 @@ in the summary.`;
 
 export async function analyzeRecipe(
   recipeText: string,
-  opts: { servings?: number; allergies?: string } = {}
+  opts: {
+    servings?: number;
+    allergies?: string;
+    age?: number;
+    dietaryPreference?: string;
+  } = {}
 ): Promise<RecipeAnalysis> {
   const client = getClient();
   if (!client) {
@@ -92,7 +97,9 @@ export async function analyzeRecipe(
 
   const details = [
     opts.servings ? `Servings: ${opts.servings}` : null,
-    opts.allergies ? `Allergies to flag: ${opts.allergies}` : null,
+    opts.age ? `Athlete's age: ${opts.age}` : null,
+    opts.allergies ? `Allergies or foods to avoid: ${opts.allergies}` : null,
+    opts.dietaryPreference ? `Dietary preference: ${opts.dietaryPreference}` : null,
   ]
     .filter(Boolean)
     .join("\n");

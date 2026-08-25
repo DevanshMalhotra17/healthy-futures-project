@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing, fonts } from "@/theme";
+import { coachTitle } from "@/utils/greeting";
 import { useAuth } from "@/state/AuthContext";
 import { Role } from "@/api/auth";
 import { CheckIcon } from "@/components/Icons";
@@ -118,7 +119,9 @@ export default function ProfileScreen() {
             {savedRole === "student" && (
               <View style={styles.inviteBlock}>
                 <Text style={styles.inviteLabel}>Coach</Text>
-                <Text style={styles.inviteCode}>{coach ? coach.fullName : "Not linked"}</Text>
+                <Text style={styles.inviteCode}>
+                  {coach ? coachTitle(coach.fullName) : "Not linked"}
+                </Text>
               </View>
             )}
           </View>

@@ -325,7 +325,8 @@ attitude, effort, coachability, skill development, character, and academic respo
 
   const rules =
     role === "coach"
-      ? `You are talking to Coach ${context.fullName}. You may mark attendance and rate the
+      ? `You are talking to Coach ${context.fullName.split(/\s+/)[0]}. Address them as
+"Coach" plus their first name. You may mark attendance and rate the
 6 non-attendance criteria for students on their roster.
 Roster: ${context.roster.length ? context.roster.map((s) => s.full_name).join(", ") : "no students yet"}.`
       : `You are talking to ${context.fullName}, a student athlete. Only their coach can mark
