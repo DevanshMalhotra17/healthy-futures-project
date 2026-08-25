@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Healthy Futures",
+    "slug": "healthy-futures",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#123626"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.tachyonleap.healthyfutures",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Healthy Futures uses your camera to record practice clips to send to your coach.",
+        "NSMicrophoneUsageDescription": "Healthy Futures uses your microphone to record audio with your practice clips.",
+        "NSPhotoLibraryUsageDescription": "Healthy Futures needs access to your library to choose a practice video to send."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#123626"
+      },
+      "package": "com.tachyonleap.healthyfutures",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_MEDIA_VIDEO"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Healthy Futures needs access to your library to choose a practice video to send.",
+          "cameraPermission": "Healthy Futures uses your camera to record practice clips to send to your coach.",
+          "microphonePermission": "Healthy Futures uses your microphone to record audio with your practice clips."
+        }
+      ],
+      "expo-font"
+    ]
+  }
+}
