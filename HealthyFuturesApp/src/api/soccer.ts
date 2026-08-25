@@ -5,15 +5,22 @@ export const SOCCER_API_BASE = (
   process.env.EXPO_PUBLIC_SOCCER_API_BASE || "https://tachyonleap-api.demo.gomllabs.com"
 ).replace(/\/$/, "");
 
-// The service's allowlist. SPEED_AND_DISTANCE exists upstream but is rejected
-// here, so it is deliberately absent.
+// Mirrors ALLOWED_MODES on the deployed analyzer (verified against the running
+// container). Analytics modes come first — they produce the numbers a player
+// actually wants; the detection modes below are visualisation only.
 export const SOCCER_MODES = [
-  { key: "RADAR", label: "Radar", hint: "Full overhead view with player tracking" },
+  { key: "SPEED_AND_DISTANCE", label: "Speed & distance", hint: "Sprint speeds and distance covered" },
+  { key: "RADAR", label: "Radar", hint: "Overhead tactical view with player positions" },
+  { key: "SPEED", label: "Speed", hint: "Per-player speed overlay" },
+  { key: "DISTANCE", label: "Distance", hint: "Distance covered per player" },
+  { key: "PASS_NETWORK", label: "Pass network", hint: "Who passed to whom" },
+  { key: "DIRECTION", label: "Direction", hint: "Movement direction of each player" },
   { key: "PLAYER_TRACKING", label: "Player tracking", hint: "Follow players through the clip" },
+  { key: "TEAM_CLASSIFICATION", label: "Teams", hint: "Split players by kit colour" },
   { key: "PLAYER_DETECTION", label: "Players", hint: "Box every player" },
   { key: "BALL_DETECTION", label: "Ball", hint: "Track the ball" },
-  { key: "TEAM_CLASSIFICATION", label: "Teams", hint: "Split players by kit colour" },
   { key: "PITCH_DETECTION", label: "Pitch", hint: "Detect pitch lines and keypoints" },
+  { key: "ALL", label: "Everything", hint: "Every overlay at once — slowest" },
 ] as const;
 
 export type SoccerMode = (typeof SOCCER_MODES)[number]["key"];

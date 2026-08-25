@@ -19,7 +19,7 @@ type Phase = "idle" | "uploading" | "processing" | "done" | "error";
 type Picked = { uri: string; name: string; mimeType?: string | null; size?: number };
 
 export default function SoccerDetail() {
-  const [mode, setMode] = useState<SoccerMode>("RADAR");
+  const [mode, setMode] = useState<SoccerMode>("SPEED_AND_DISTANCE");
   const [picked, setPicked] = useState<Picked | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -137,8 +137,8 @@ export default function SoccerDetail() {
     <View style={styles.panel}>
       <Text style={styles.title}>Analyze a match clip</Text>
       <Text style={styles.sub}>
-        Upload a clip and the analyzer marks up players, the ball, and the pitch. It runs on CPU,
-        so a short clip still takes a few minutes.
+        Upload a clip and the analyzer tracks players, the ball, and the pitch. A short clip
+        usually comes back in under a minute.
       </Text>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modeRow}>
