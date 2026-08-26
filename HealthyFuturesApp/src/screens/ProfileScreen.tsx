@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing, fonts } from "@/theme";
 import { coachTitle } from "@/utils/greeting";
+import FaceEnrollment from "@/components/FaceEnrollment";
 import { useAuth } from "@/state/AuthContext";
 import { Role } from "@/api/auth";
 import { CheckIcon } from "@/components/Icons";
@@ -93,7 +94,11 @@ export default function ProfileScreen() {
 
   if (token) {
     return (
-      <View style={[styles.screen, { paddingTop: insets.top + 12 }]}>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={{ paddingTop: insets.top + 12, paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.container}>
           <Text style={styles.title}>Profile</Text>
           <View style={styles.accountCard}>
@@ -125,11 +130,13 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
+          <FaceEnrollment />
+
           <Pressable style={styles.logoutBtn} onPress={() => logout()}>
             <Text style={styles.logoutBtnText}>Log out</Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     );
   }
 

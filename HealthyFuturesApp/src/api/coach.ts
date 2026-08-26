@@ -1,4 +1,4 @@
-import { apiGet } from "./client";
+import { apiGet, apiPost } from "./client";
 
 export type RosterStudent = {
   id: string;
@@ -48,6 +48,35 @@ export const COMPANION_LABELS: Record<CompanionName, string> = {
   zenfit: "ZenFit",
   soccer: "Soccer",
 };
+
+// Enrolled faces for this coach's roster, passed to the analyzer for tier-2
+// matching. Empty when nobody has enrolled.
+export async function getFaceDb(
+  token?: string | null
+): Promise<{ student_id: string; embedding: number[] }[]> {
+  const data = await apiGet<{ faces: { student_id: string; embedding: number[] }[] }>(
+    "/soccer/face-db",
+    token
+  );
+  return data.faces || [];
+}
+
+export async function saveSoccerResult(
+  input: {
+    student_id: string;
+    session_ref: string;
+    effort: number;
+    distance_m?: number;
+    top_speed_ms?: number;
+    sprints?: number;
+    rank_in_clip?: number;
+    players_in_clip?: number;
+    identified_by?: string | null;
+  },
+  token?: string | null
+): Promise<void> {
+  await apiPost("/soccer/results", input, token);
+}
 
 export async function getStudentActivity(
   studentId: string,

@@ -13,6 +13,7 @@ import sessionsRoutes from "./routes/sessions";
 import nutritionRoutes from "./routes/nutrition";
 import primefitRoutes from "./routes/primefit";
 import zenfitRoutes from "./routes/zenfit";
+import soccerRoutes from "./routes/soccer";
 import { errorHandler, notFoundHandler } from "./middleware/errors";
 import { assertAuthConfig } from "./middleware/auth";
 import { pool } from "./db/pool";
@@ -68,6 +69,7 @@ app.use("/api/sessions", sessionsRoutes);
 app.use("/api/recipe-recommendation", messageLimiter, nutritionRoutes);
 app.use("/api/primefit-results", primefitRoutes);
 app.use("/api/zenfit", messageLimiter, zenfitRoutes);
+app.use("/api/soccer", soccerRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

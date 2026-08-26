@@ -1,43 +1,48 @@
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { useVideoPlayer, VideoView } from "expo-video";
 import { colors, radius, fonts } from "@/theme";
+import { useAuth } from "@/state/AuthContext";
 import {
   uploadClip,
   getStatus,
-  resultUrl,
-  SOCCER_MODES,
-  SoccerMode,
+  getAnalysis,
   SoccerError,
   MAX_VIDEO_BYTES,
+  Analysis,
+  AnalyzedPlayer,
 } from "@/api/soccer";
+import { getFaceDb, getRoster, saveSoccerResult, RosterStudent } from "@/api/coach";
 
-const POLL_MS = 4000;
+const POLL_MS = 5000;
 
 type Phase = "idle" | "uploading" | "processing" | "done" | "error";
 type Picked = { uri: string; name: string; mimeType?: string | null; size?: number };
 
 export default function SoccerDetail() {
-  const [mode, setMode] = useState<SoccerMode>("SPEED_AND_DISTANCE");
+  const { token, role } = useAuth();
+  const isCoach = role === "coach";
+
   const [picked, setPicked] = useState<Picked | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [roster, setRoster] = useState<RosterStudent[]>([]);
+  const [assigning, setAssigning] = useState<number | null>(null);
+  const [assigned, setAssigned] = useState<Record<number, string>>({});
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const player = useVideoPlayer(
-    phase === "done" && sessionId ? resultUrl(sessionId) : null,
-    (p) => {
-      p.loop = true;
-    }
-  );
-
   useEffect(() => {
+    if (isCoach && token) {
+      getRoster(token)
+        .then(({ students }) => setRoster(students))
+        .catch(() => setRoster([]));
+    }
     return () => {
       if (poll.current) clearInterval(poll.current);
     };
-  }, []);
+  }, [isCoach, token]);
 
   async function choose(fromCamera: boolean) {
     setMessage(null);
@@ -50,12 +55,11 @@ export default function SoccerDetail() {
         }
       }
       const result = fromCamera
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ["videos"], videoMaxDuration: 60 })
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ["videos"] })
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"] });
 
       const asset = result.canceled ? null : result.assets?.[0];
       if (!asset?.uri) return;
-
       if (asset.fileSize && asset.fileSize > MAX_VIDEO_BYTES) {
         setMessage("That clip is over 450 MB. Trim it or record a shorter one.");
         return;
@@ -70,6 +74,8 @@ export default function SoccerDetail() {
       });
       setPhase("idle");
       setSessionId(null);
+      setAnalysis(null);
+      setAssigned({});
     } catch {
       setMessage("Couldn't open the camera roll.");
     }
@@ -79,10 +85,11 @@ export default function SoccerDetail() {
     if (!picked || phase === "uploading" || phase === "processing") return;
     setPhase("uploading");
     setMessage(null);
-    setSessionId(null);
 
     try {
-      const id = await uploadClip(picked, mode);
+      // Enrolled faces let the analyzer resolve players without a tap.
+      const faceDb = isCoach && token ? await getFaceDb(token).catch(() => []) : [];
+      const id = await uploadClip(picked, faceDb);
       setSessionId(id);
       setPhase("processing");
       startPolling(id);
@@ -103,11 +110,11 @@ export default function SoccerDetail() {
         const { status, error } = await getStatus(id);
         if (status === "done") {
           stopPolling();
+          setAnalysis(await getAnalysis(id));
           setPhase("done");
         } else if (status === "error") {
           stopPolling();
           setPhase("error");
-          // The analyzer returns a stderr tail; the first line is the useful part.
           setMessage(error?.split("\n")[0] || "Analysis failed on the server.");
         }
       } catch (e) {
@@ -127,8 +134,36 @@ export default function SoccerDetail() {
     stopPolling();
     setPicked(null);
     setSessionId(null);
+    setAnalysis(null);
+    setAssigned({});
     setPhase("idle");
     setMessage(null);
+  }
+
+  async function attribute(player: AnalyzedPlayer, student: RosterStudent) {
+    if (!token || !sessionId || !analysis) return;
+    setAssigning(player.tracker_id);
+    try {
+      await saveSoccerResult(
+        {
+          student_id: student.id,
+          session_ref: sessionId,
+          effort: player.effort,
+          distance_m: player.distance,
+          top_speed_ms: player.top_speed,
+          sprints: player.sprints,
+          rank_in_clip: player.rank,
+          players_in_clip: analysis.player_count,
+          identified_by: player.identified_by ?? "needs_tap",
+        },
+        token
+      );
+      setAssigned((a) => ({ ...a, [player.tracker_id]: student.fullName }));
+    } catch {
+      setMessage("Couldn't save that result.");
+    } finally {
+      setAssigning(null);
+    }
   }
 
   const busy = phase === "uploading" || phase === "processing";
@@ -137,26 +172,10 @@ export default function SoccerDetail() {
     <View style={styles.panel}>
       <Text style={styles.title}>Analyze a match clip</Text>
       <Text style={styles.sub}>
-        Upload a clip and the analyzer tracks players, the ball, and the pitch. A short clip
-        usually comes back in under a minute.
+        {isCoach
+          ? "Upload a clip to get an effort score for each player, then assign them to your students."
+          : "Your coach uploads match clips here and assigns your effort score."}
       </Text>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.modeRow}>
-        {SOCCER_MODES.map((m) => {
-          const active = m.key === mode;
-          return (
-            <Pressable
-              key={m.key}
-              style={[styles.chip, active && styles.chipActive]}
-              onPress={() => setMode(m.key)}
-              disabled={busy}
-            >
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{m.label}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-      <Text style={styles.modeHint}>{SOCCER_MODES.find((m) => m.key === mode)?.hint}</Text>
 
       {!picked ? (
         <>
@@ -206,15 +225,76 @@ export default function SoccerDetail() {
 
       {phase === "processing" && (
         <Text style={styles.note}>
-          Still working. Analysis keeps running on the server, but this panel stops tracking it if
-          you close the app.
+          Tracking every player and measuring how much ground they covered. This takes a minute
+          or two.
         </Text>
       )}
 
-      {phase === "done" && sessionId && (
+      {phase === "done" && analysis && (
         <View style={styles.resultBlock}>
-          <Text style={styles.resultLabel}>Analysis ready</Text>
-          <VideoView player={player} style={styles.video} allowsFullscreen contentFit="contain" />
+          <Text style={styles.resultLabel}>
+            {analysis.player_count} players · {analysis.calibrated ? "measured in metres" : "relative effort"}
+          </Text>
+          {!analysis.calibrated && (
+            <Text style={styles.calNote}>
+              No pitch lines detected, so effort is scored relative to the other players rather
+              than in metres.
+            </Text>
+          )}
+
+          {analysis.identification.jersey + analysis.identification.face > 0 && (
+            <Text style={styles.idNote}>
+              Auto-matched {analysis.identification.jersey} by number,{" "}
+              {analysis.identification.face} by face.
+            </Text>
+          )}
+
+          {analysis.players.slice(0, 12).map((p) => (
+            <View style={styles.playerRow} key={p.tracker_id}>
+              <View style={styles.effortBadge}>
+                <Text style={styles.effortValue}>{p.effort}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.playerName}>
+                  {assigned[p.tracker_id] ??
+                    (p.jersey_number !== null
+                      ? `#${p.jersey_number}`
+                      : `Player ${p.tracker_id}`)}
+                  {p.team !== null ? `  ·  Team ${p.team + 1}` : ""}
+                </Text>
+                <Text style={styles.playerStats}>
+                  {analysis.calibrated
+                    ? `${Math.round(p.distance)}m · ${p.top_speed.toFixed(1)} m/s · ${p.sprints} sprints`
+                    : `${p.sprints} bursts · ${p.seconds_tracked}s tracked`}
+                </Text>
+
+                {isCoach && !assigned[p.tracker_id] && roster.length > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tapRow}>
+                    {roster.map((s) => (
+                      <Pressable
+                        key={s.id}
+                        style={styles.tapChip}
+                        onPress={() => attribute(p, s)}
+                        disabled={assigning !== null}
+                      >
+                        {assigning === p.tracker_id ? (
+                          <ActivityIndicator size="small" color={colors.pitchDark} />
+                        ) : (
+                          <Text style={styles.tapChipText}>
+                            {s.fullName.split(/\s+/)[0]}
+                          </Text>
+                        )}
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                )}
+                {assigned[p.tracker_id] && (
+                  <Text style={styles.assignedNote}>Saved to {assigned[p.tracker_id]}</Text>
+                )}
+              </View>
+            </View>
+          ))}
+
           <Pressable style={styles.pickBtnGhost} onPress={reset}>
             <Text style={styles.pickBtnGhostText}>Analyze another clip</Text>
           </Pressable>
@@ -244,24 +324,6 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
-  modeRow: { flexDirection: "row", marginTop: 14 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: radius.pill,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    marginRight: 7,
-  },
-  chipActive: { backgroundColor: colors.white },
-  chipText: { fontFamily: fonts.bodyBold, fontSize: 11.5, color: "rgba(255,255,255,0.85)" },
-  chipTextActive: { color: colors.pitchDark },
-  modeHint: {
-    fontFamily: fonts.body,
-    fontSize: 10.5,
-    color: "rgba(255,255,255,0.6)",
-    marginTop: 7,
-  },
-
   pickBtn: {
     marginTop: 14,
     backgroundColor: colors.white,
@@ -271,7 +333,7 @@ const styles = StyleSheet.create({
   },
   pickBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 12.5, color: colors.pitchDark },
   pickBtnGhost: {
-    marginTop: 8,
+    marginTop: 10,
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.5)",
     borderRadius: radius.pill,
@@ -317,12 +379,60 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 1,
   },
-  video: {
-    width: "100%",
-    height: 200,
-    marginTop: 8,
-    borderRadius: radius.sm,
-    backgroundColor: "#000",
+  calNote: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: "rgba(255,255,255,0.65)",
+    marginTop: 6,
+    lineHeight: 15,
+  },
+  idNote: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: "rgba(255,255,255,0.75)",
+    marginTop: 6,
+  },
+
+  playerRow: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.12)",
+  },
+  effortBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.pitch,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  effortValue: { fontFamily: fonts.mono, fontSize: 15, color: colors.white },
+  playerName: { fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.white },
+  playerStats: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    color: "rgba(255,255,255,0.65)",
+    marginTop: 2,
+  },
+  tapRow: { flexDirection: "row", marginTop: 7 },
+  tapChip: {
+    backgroundColor: "rgba(255,255,255,0.9)",
+    borderRadius: radius.pill,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    marginRight: 6,
+    minWidth: 46,
+    alignItems: "center",
+  },
+  tapChipText: { fontFamily: fonts.bodyExtraBold, fontSize: 11, color: colors.pitchDark },
+  assignedNote: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 10.5,
+    color: "#BFE6CE",
+    marginTop: 5,
   },
 
   note: {

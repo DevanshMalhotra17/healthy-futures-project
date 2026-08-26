@@ -170,3 +170,33 @@ CREATE TABLE IF NOT EXISTS companion_activity (
 
 CREATE INDEX IF NOT EXISTS idx_companion_activity_user
   ON companion_activity(user_id, created_at DESC);
+
+-- Face enrolment for soccer-clip identification. This is biometric data about a
+-- minor, so: consent is recorded explicitly, the row is deletable on request,
+-- and only the embedding is kept for matching (no photo is stored server-side).
+CREATE TABLE IF NOT EXISTS face_enrollments (
+  user_id       UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  embedding     REAL[] NOT NULL,
+  consent_by    TEXT NOT NULL,
+  consent_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Per-student soccer results, so a coach's attribution persists and shows up in
+-- the student's own history.
+CREATE TABLE IF NOT EXISTS soccer_results (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_ref   TEXT NOT NULL,
+  effort        INTEGER NOT NULL,
+  distance_m    REAL,
+  top_speed_ms  REAL,
+  sprints       INTEGER,
+  rank_in_clip  INTEGER,
+  players_in_clip INTEGER,
+  identified_by TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_soccer_results_user
+  ON soccer_results(user_id, created_at DESC);

@@ -5,27 +5,42 @@ export const SOCCER_API_BASE = (
   process.env.EXPO_PUBLIC_SOCCER_API_BASE || "https://tachyonleap-api.demo.gomllabs.com"
 ).replace(/\/$/, "");
 
-// Mirrors ALLOWED_MODES on the deployed analyzer (verified against the running
-// container). Analytics modes come first — they produce the numbers a player
-// actually wants; the detection modes below are visualisation only.
-export const SOCCER_MODES = [
-  { key: "SPEED_AND_DISTANCE", label: "Speed & distance", hint: "Sprint speeds and distance covered" },
-  { key: "RADAR", label: "Radar", hint: "Overhead tactical view with player positions" },
-  { key: "SPEED", label: "Speed", hint: "Per-player speed overlay" },
-  { key: "DISTANCE", label: "Distance", hint: "Distance covered per player" },
-  { key: "PASS_NETWORK", label: "Pass network", hint: "Who passed to whom" },
-  { key: "DIRECTION", label: "Direction", hint: "Movement direction of each player" },
-  { key: "PLAYER_TRACKING", label: "Player tracking", hint: "Follow players through the clip" },
-  { key: "TEAM_CLASSIFICATION", label: "Teams", hint: "Split players by kit colour" },
-  { key: "PLAYER_DETECTION", label: "Players", hint: "Box every player" },
-  { key: "BALL_DETECTION", label: "Ball", hint: "Track the ball" },
-  { key: "PITCH_DETECTION", label: "Pitch", hint: "Detect pitch lines and keypoints" },
-  { key: "ALL", label: "Everything", hint: "Every overlay at once — slowest" },
-] as const;
-
-export type SoccerMode = (typeof SOCCER_MODES)[number]["key"];
-
 export type SoccerStatus = "queued" | "running" | "done" | "error";
+
+// How a player in the clip was matched to a student. "needs_tap" means neither
+// the jersey number nor the face was resolvable, so the coach picks manually.
+export type IdentifiedBy = "jersey" | "face" | "needs_tap" | null;
+
+export type AnalyzedPlayer = {
+  tracker_id: number;
+  effort: number;
+  rank: number;
+  distance: number;
+  top_speed: number;
+  avg_speed: number;
+  sprints: number;
+  seconds_tracked: number;
+  team: number | null;
+  box: [number, number, number, number] | null;
+  identified_by: IdentifiedBy;
+  student_id: string | null;
+  jersey_number: number | null;
+};
+
+export type Analysis = {
+  players: AnalyzedPlayer[];
+  player_count: number;
+  calibrated: boolean;
+  pitch_note: string;
+  units: string;
+  identification: {
+    jersey: number;
+    face: number;
+    needs_tap: number;
+    ocr_available: boolean;
+    face_available: boolean;
+  };
+};
 
 // The deployed nginx caps the request body at 500 MB; fail before the upload
 // rather than after, since a rejection there returns an HTML error page, not
@@ -34,9 +49,11 @@ export const MAX_VIDEO_BYTES = 450 * 1024 * 1024;
 
 export class SoccerError extends Error {}
 
+// One full analysis. faceDb is the coach's enrolled roster, used for tier-2
+// matching; omit it and the cascade falls through to coach tap.
 export async function uploadClip(
   video: { uri: string; name: string; mimeType?: string | null },
-  mode: SoccerMode
+  faceDb?: { student_id: string; embedding: number[] }[]
 ): Promise<string> {
   const form = new FormData();
   // React Native's FormData takes this shape for file parts; the type assertion
@@ -46,11 +63,13 @@ export async function uploadClip(
     name: video.name || "clip.mp4",
     type: video.mimeType || "video/mp4",
   } as unknown as Blob);
-  form.append("mode", mode);
+  if (faceDb?.length) {
+    form.append("face_db", JSON.stringify(faceDb));
+  }
 
   // Content-Type is intentionally unset so the runtime supplies the multipart
   // boundary.
-  const res = await fetch(`${SOCCER_API_BASE}/api/soccer/sessions`, {
+  const res = await fetch(`${SOCCER_API_BASE}/api/soccer/analyze`, {
     method: "POST",
     body: form,
   });
@@ -81,10 +100,14 @@ export async function getStatus(
   return (await res.json()) as { status: SoccerStatus; error: string | null };
 }
 
-// The result is an MP4 stream, so this URL is handed straight to the player
-// rather than downloaded into memory.
-export function resultUrl(sessionId: string): string {
-  return `${SOCCER_API_BASE}/api/soccer/sessions/${encodeURIComponent(sessionId)}/result`;
+export async function getAnalysis(sessionId: string): Promise<Analysis> {
+  const res = await fetch(
+    `${SOCCER_API_BASE}/api/soccer/analyze/${encodeURIComponent(sessionId)}/result`
+  );
+  if (!res.ok) {
+    throw new SoccerError(await describeFailure(res));
+  }
+  return (await res.json()) as Analysis;
 }
 
 // The analyzer returns JSON errors, but nginx returns HTML for things like an
