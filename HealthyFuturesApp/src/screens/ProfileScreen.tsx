@@ -19,6 +19,7 @@ import { colors, radius, spacing, fonts } from "@/theme";
 import { API_BASE_URL } from "@/api/client";
 import { coachTitle } from "@/utils/greeting";
 import FaceEnrollment from "@/components/FaceEnrollment";
+import NutritionProfileCard from "@/components/NutritionProfileCard";
 import { useAuth } from "@/state/AuthContext";
 import {
   Role,
@@ -201,6 +202,7 @@ export default function ProfileScreen() {
             )}
           </View>
           <FaceEnrollment />
+          <NutritionProfileCard />
 
           <Pressable style={styles.logoutBtn} onPress={() => logout()}>
             <Text style={styles.logoutBtnText}>Log out</Text>

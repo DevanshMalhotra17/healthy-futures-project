@@ -16,7 +16,6 @@ import CoachHomeScreen from "@/screens/CoachHomeScreen";
 import CoachRosterScreen from "@/screens/CoachRosterScreen";
 import CoachCriteriaScreen from "@/screens/CoachCriteriaScreen";
 import CompanionsScreen from "@/screens/CompanionsScreen";
-import RoutineScreen from "@/screens/RoutineScreen";
 import MessagesScreen from "@/screens/MessagesScreen";
 import ScheduleScreen from "@/screens/ScheduleScreen";
 import ProfileScreen from "@/screens/ProfileScreen";
@@ -35,10 +34,8 @@ export type CompanionPanel = "soccer" | "nutrition" | "primefit" | "zenfit";
 
 export type RootTabParamList = {
   Home: undefined;
-  // `open` lets a nudge deep-link straight into one companion; `focus` scrolls
-  // the routine screen to the habit the nudge was about.
+  // `open` lets a nudge deep-link straight into one companion.
   Companions: { openSoccer?: boolean; open?: CompanionPanel } | undefined;
-  Routine: { focus?: string } | undefined;
   Roster: undefined;
   LevelUp: undefined;
   Messages: undefined;
@@ -52,7 +49,6 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 // can't push the app somewhere that doesn't exist for this role.
 const NUDGE_SCREENS: ReadonlySet<keyof RootTabParamList> = new Set([
   "Home",
-  "Routine",
   "Companions",
   "Schedule",
   "Messages",
@@ -175,13 +171,7 @@ export default function RootNavigator() {
             }}
           />
         </>
-      ) : (
-        <Tab.Screen
-          name="Routine"
-          component={RoutineScreen}
-          options={{ tabBarIcon: ({ color }) => <DumbbellIcon size={21} color={color} /> }}
-        />
-      )}
+      ) : null}
       {/* Both roles: coaches use the companions themselves, and Soccer is where
           they upload match clips. */}
       <Tab.Screen

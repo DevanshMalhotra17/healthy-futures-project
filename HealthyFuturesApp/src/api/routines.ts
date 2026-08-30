@@ -74,8 +74,38 @@ export type HealthSyncResult = {
 // Pushes measured values from the device's health store. The server only flips a
 // boolean when the student hasn't already set that item by hand.
 export async function syncHealth(
-  input: { active_minutes?: number | null; sleep_hours?: number | null },
+  input: {
+    active_minutes?: number | null;
+    sleep_hours?: number | null;
+    exercise_at?: string | null;
+  },
   token?: string | null
 ): Promise<HealthSyncResult> {
   return apiPut<HealthSyncResult>("/routines/health-sync", input, token);
+}
+
+// Today's items, each earned from evidence rather than a self-reported tick.
+export type DerivedItem = {
+  key: "exercise" | "stretch" | "sleep" | "practice" | "meals" | "breakfast";
+  label: string;
+  met: boolean;
+  detail: string;
+};
+
+export type DerivedDay = {
+  items: DerivedItem[];
+  met_count: number;
+  total: number;
+  active_minutes: number | null;
+  sleep_hours: number | null;
+  session_title: string | null;
+  session_starts_at: string | null;
+};
+
+export async function getDerivedDay(
+  token?: string | null,
+  studentId?: string
+): Promise<DerivedDay> {
+  const q = studentId ? `?student_id=${encodeURIComponent(studentId)}` : "";
+  return apiGet<DerivedDay>(`/routines/derived${q}`, token);
 }

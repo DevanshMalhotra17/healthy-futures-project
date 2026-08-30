@@ -67,6 +67,11 @@ router.post(
       throw new HttpError(400, "age must be a realistic number.");
     }
 
+    // Age, allergies and diet are asked once and stored. A request that omits
+    // them still gets personalised advice by falling back to the saved profile.
+    const { loadNutritionProfile } = await import("./profile");
+    const profile = await loadNutritionProfile(req.user!.userId);
+
     let mealType: MealType | undefined;
     if (meal_type !== undefined && meal_type !== null && meal_type !== "") {
       const candidate = String(meal_type).trim().toLowerCase();
@@ -123,11 +128,14 @@ router.post(
 
     const analysis = await analyzeRecipe(text, {
       servings: servingCount,
-      age: ageValue,
-      allergies: allergies === undefined || allergies === null ? undefined : String(allergies),
+      age: ageValue ?? profile.age ?? undefined,
+      allergies:
+        allergies === undefined || allergies === null
+          ? profile.allergies || undefined
+          : String(allergies),
       dietaryPreference:
         dietary_preference === undefined || dietary_preference === null
-          ? undefined
+          ? profile.dietary_preference || undefined
           : String(dietary_preference),
       mealType,
       snackTime,

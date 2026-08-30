@@ -133,7 +133,7 @@ router.put(
   })
 );
 
-async function buildCard(studentId: string) {
+export async function buildCard(studentId: string) {
   const ratingResult = await pool.query(
     `SELECT ${RATED_CRITERIA.join(", ")}, character_override, effort_override, skill_override, note, updated_at
      FROM criteria_ratings

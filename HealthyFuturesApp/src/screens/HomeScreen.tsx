@@ -12,7 +12,7 @@ import TrendsSection from "@/components/TrendsSection";
 import { useAuth } from "@/state/AuthContext";
 import { greetingFor, firstNameOf, coachTitle } from "@/utils/greeting";
 import { getCriteria, CriteriaCard } from "@/api/criteria";
-import { getToday, FITNESS_DAYS_TARGET } from "@/api/routines";
+import { getDerivedDay, DerivedDay } from "@/api/routines";
 import { listSessions, TrainingSession } from "@/api/sessions";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { RootTabParamList } from "@/navigation/RootNavigator";
@@ -23,7 +23,7 @@ export default function HomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { fullName, token, coach } = useAuth();
   const [card, setCard] = useState<CriteriaCard | null>(null);
-  const [routine, setRoutine] = useState<{ fitnessDays: number; streak: number } | null>(null);
+  const [day, setDay] = useState<DerivedDay | null>(null);
   const [upcoming, setUpcoming] = useState<TrainingSession[]>([]);
   const [loadingCard, setLoadingCard] = useState(true);
 
@@ -32,18 +32,13 @@ export default function HomeScreen({ navigation }: Props) {
       setLoadingCard(false);
       return;
     }
-    const [criteriaResult, routineResult, sessionsResult] = await Promise.allSettled([
+    const [criteriaResult, dayResult, sessionsResult] = await Promise.allSettled([
       getCriteria(undefined, token),
-      getToday(token),
+      getDerivedDay(token),
       listSessions(token),
     ]);
     if (criteriaResult.status === "fulfilled") setCard(criteriaResult.value);
-    if (routineResult.status === "fulfilled") {
-      setRoutine({
-        fitnessDays: routineResult.value.fitness_days_this_week,
-        streak: routineResult.value.habit_streak,
-      });
-    }
+    if (dayResult.status === "fulfilled") setDay(dayResult.value);
     if (sessionsResult.status === "fulfilled") {
       const now = Date.now();
       setUpcoming(
@@ -83,35 +78,52 @@ export default function HomeScreen({ navigation }: Props) {
               </View>
             )}
           </View>
-          {routine !== null && routine.streak > 0 && (
+          {day !== null && day.met_count > 0 && (
             <View style={styles.streakChip}>
               <FlameIcon size={13} />
-              <Text style={styles.streakText}>{routine.streak}</Text>
+              <Text style={styles.streakText}>{day.met_count}</Text>
             </View>
           )}
         </View>
 
-        {/* At-home routine progress for this week */}
-        <Pressable style={styles.ringCard} onPress={() => navigation.navigate("Routine")}>
+        {/* Today, derived from Apple Health, practice clips and meal photos.
+            Read-only on purpose: nothing here can simply be ticked. */}
+        <View style={styles.ringCard}>
           <ProgressRing
-            progress={Math.min(1, (routine?.fitnessDays ?? 0) / FITNESS_DAYS_TARGET)}
-            centerValue={`${routine?.fitnessDays ?? 0}/${FITNESS_DAYS_TARGET}`}
-            centerLabel="Fitness"
+            progress={day ? day.met_count / day.total : 0}
+            centerValue={day ? `${day.met_count}/${day.total}` : "-"}
+            centerLabel="Today"
           />
           <View style={styles.ringCopy}>
-            <Text style={styles.eyebrow}>This week</Text>
+            <Text style={styles.eyebrow}>Today</Text>
             <Text style={styles.ringHeadline}>
-              {(routine?.fitnessDays ?? 0) >= FITNESS_DAYS_TARGET
-                ? "Target met.\nNice work."
-                : "At-home routine"}
+              {day && day.met_count === day.total ? "All done." : "Your day so far"}
             </Text>
             <Text style={styles.ringSub}>
-              {(routine?.fitnessDays ?? 0) >= FITNESS_DAYS_TARGET
-                ? `${routine?.streak ?? 0}-day habit streak. Keep it rolling.`
-                : `Aim for ${FITNESS_DAYS_TARGET}–5 fitness days. Tap to log today.`}
+              {day?.session_title
+                ? `Measured around ${day.session_title}.`
+                : "Filled in from Apple Health, clips and meal photos."}
             </Text>
           </View>
-        </Pressable>
+        </View>
+
+        {day && (
+          <View style={styles.dayList}>
+            {day.items.map((item) => (
+              <View style={styles.dayRow} key={item.key}>
+                <View style={[styles.dayDot, item.met && styles.dayDotMet]}>
+                  {item.met && <CheckIcon size={10} color={colors.white} />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.dayLabel, item.met && styles.dayLabelMet]}>
+                    {item.label}
+                  </Text>
+                  <Text style={styles.dayDetail}>{item.detail}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Practice video upload */}
         <View style={{ marginTop: spacing.md }}>
@@ -265,6 +277,34 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.md,
   },
+  dayList: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingVertical: 4,
+  },
+  dayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  dayDot: {
+    width: 19,
+    height: 19,
+    borderRadius: 6,
+    borderWidth: 1.6,
+    borderColor: colors.line,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayDotMet: { backgroundColor: colors.pitch, borderColor: colors.pitch },
+  dayLabel: { fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.inkSoft },
+  dayLabelMet: { color: colors.ink },
+  dayDetail: { fontFamily: fonts.body, fontSize: 10.5, color: colors.inkSoft, marginTop: 1 },
   ringCopy: { flex: 1 },
   eyebrow: {
     fontFamily: fonts.mono,

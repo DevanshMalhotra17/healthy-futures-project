@@ -14,6 +14,12 @@ type HealthModule = {
     identifier: string,
     options: Record<string, unknown>
   ) => Promise<{ startDate: string; endDate: string; value: number }[]>;
+  queryQuantitySamples: (
+    identifier: string,
+    options: Record<string, unknown>
+  ) => Promise<
+    readonly { startDate: string | Date; endDate: string | Date; quantity: number }[]
+  >;
 };
 
 let health: HealthModule | null = null;
@@ -40,6 +46,9 @@ export function isHealthAvailable(): boolean {
 export type HealthReading = {
   activeMinutes: number | null;
   sleepHours: number | null;
+  // When the day's biggest bout of exercise happened, so the server can judge
+  // whether it sat near that day's session.
+  exerciseAt: string | null;
 };
 
 // Asks permission once and reads today's exercise minutes plus last night's
@@ -87,6 +96,27 @@ export async function readToday(): Promise<
       // No exercise data recorded today.
     }
 
+    // The longest single bout stands in for "when did you train today" — more
+    // meaningful than the first sample, which is often incidental movement.
+    let exerciseAt: string | null = null;
+    try {
+      const samples = await health.queryQuantitySamples(EXERCISE_TIME, {
+        filter: { startDate: startOfDay, endDate: now },
+        unit: "min",
+      });
+      let best: { at: string; qty: number } | null = null;
+      for (const s of samples) {
+        const qty = typeof s.quantity === "number" ? s.quantity : 0;
+        if (!best || qty > best.qty) {
+          best = { at: new Date(s.startDate).toISOString(), qty };
+        }
+      }
+      if (best && best.qty > 0) exerciseAt = best.at;
+    } catch {
+      // Older module versions or no samples — the server treats this as unknown
+      // and credits the day rather than punishing it.
+    }
+
     let sleepHours: number | null = null;
     try {
       // Sleep spans midnight, so look back from yesterday afternoon.
@@ -109,7 +139,7 @@ export async function readToday(): Promise<
     if (activeMinutes === null && sleepHours === null) {
       return { ok: false, reason: "No exercise or sleep data recorded yet today." };
     }
-    return { ok: true, reading: { activeMinutes, sleepHours } };
+    return { ok: true, reading: { activeMinutes, sleepHours, exerciseAt } };
   } catch (error) {
     return {
       ok: false,

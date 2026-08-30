@@ -1,7 +1,24 @@
 import Constants from "expo-constants";
 
 const API_PORT = 3000;
-const REQUEST_TIMEOUT_MS = 15_000;
+// Plenty for a normal CRUD round trip (measured at 130-200ms in production).
+const REQUEST_TIMEOUT_MS = 20_000;
+// Anything that waits on a model is a different order of magnitude: a vision
+// call on a phone photo measured 10-22s against production, so 15s was aborting
+// perfectly good requests roughly a third of the time.
+const AI_TIMEOUT_MS = 90_000;
+// Matched by prefix, so /recipe-recommendation and friends get the long budget.
+const AI_PATHS = [
+  "/recipe-recommendation",
+  "/zenfit",
+  "/messages",
+  "/sessions/import-photo",
+  "/soccer",
+];
+
+function timeoutFor(path: string): number {
+  return AI_PATHS.some((p) => path.startsWith(p)) ? AI_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+}
 
 // In Expo Go the packager host is the dev machine's LAN IP, which is also where
 // healthy-futures-api runs — so deriving it beats hardcoding an address that
@@ -34,14 +51,17 @@ export class ApiError extends Error {
 // UI spinning indefinitely rather than surfacing an error.
 async function request<TResponse>(path: string, init: RequestInit): Promise<TResponse> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutFor(path));
 
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, { ...init, signal: controller.signal });
   } catch (e) {
+    // A timeout and an unreachable server are different problems, and telling
+    // someone to "check your connection" when the request was simply slow sends
+    // them chasing the wrong thing.
     if (e instanceof Error && e.name === "AbortError") {
-      throw new ApiError(`Couldn't reach the server at ${API_BASE_URL}.`, 0);
+      throw new ApiError("That took too long to come back. Try again.", 0);
     }
     throw new ApiError(`Couldn't reach the server at ${API_BASE_URL}.`, 0);
   } finally {

@@ -17,6 +17,8 @@ import zenfitRoutes from "./routes/zenfit";
 import soccerRoutes from "./routes/soccer";
 import nudgesRoutes from "./routes/nudges";
 import trendsRoutes from "./routes/trends";
+import widgetRoutes from "./routes/widget";
+import profileRoutes from "./routes/profile";
 import videosRoutes, { purgeExpiredVideos } from "./routes/videos";
 import { runAll } from "./services/nudgeRunner";
 import { errorHandler, notFoundHandler } from "./middleware/errors";
@@ -31,12 +33,10 @@ const PORT = Number(process.env.PORT) || 8090;
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin: corsOrigins() }));
-// The two routes that carry a base64 photo (a meal picture, a schedule photo)
-// need a bigger ceiling; everything else stays tight. Registered before the
-// global parser so these win for their own paths.
-const photoJson = express.json({ limit: "8mb" });
-app.use("/api/recipe-recommendation", photoJson);
-app.use("/api/sessions/import-photo", photoJson);
+// Meal photos arrive as base64 in the JSON body, so that one route needs a
+// bigger ceiling than the 1 MB everything else gets. Registered first so it
+// wins for its own path. (Schedule photos use multipart, not this parser.)
+app.use("/api/recipe-recommendation", express.json({ limit: "8mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 // Credential endpoints are the brute-force target, so they get a tighter
@@ -87,6 +87,8 @@ app.use("/api/zenfit", messageLimiter, zenfitRoutes);
 app.use("/api/soccer", soccerRoutes);
 app.use("/api/nudges", nudgesRoutes);
 app.use("/api/trends", trendsRoutes);
+app.use("/api/widget", widgetRoutes);
+app.use("/api/profile", profileRoutes);
 app.use("/api/videos", videosRoutes);
 
 // Public, unauthenticated: the App Store review team and parents must be able to

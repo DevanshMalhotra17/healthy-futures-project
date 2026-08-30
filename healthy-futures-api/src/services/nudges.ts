@@ -3,7 +3,6 @@ import { pool } from "../db/pool";
 // Where a nudge lands when tapped. Screen names match RootTabParamList in the
 // app, so a nudge about a companion opens that companion, not a generic tab.
 export type NudgeTarget =
-  | { screen: "Routine"; params?: { focus?: string } }
   | { screen: "Companions"; params?: { open?: "soccer" | "nutrition" | "primefit" | "zenfit" } }
   | { screen: "Schedule" }
   | { screen: "Messages" }
@@ -74,15 +73,6 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
         priority: 90,
       });
     }
-    if (m > 50 && m <= 70 && !t.water) {
-      add({
-        kind: "pre_session_water",
-        title: "Water before you go",
-        body: "You can't catch up on hydration once you're out there.",
-        target: { screen: "Routine", params: { focus: "water" } },
-        priority: 95,
-      });
-    }
     if (m > 20 && m <= 35) {
       add({
         kind: "pre_session_bottle",
@@ -101,7 +91,7 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
         kind: "post_session_stretch",
         title: "Stretch while you're warm",
         body: "Ten minutes now saves you tomorrow.",
-        target: { screen: "Routine", params: { focus: "stretch" } },
+        target: { screen: "Home" },
         priority: 92,
       });
     }
@@ -110,7 +100,7 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
         kind: "post_session_stretch_late",
         title: "Still worth stretching",
         body: "Tomorrow-you will notice.",
-        target: { screen: "Routine", params: { focus: "stretch" } },
+        target: { screen: "Home" },
         priority: 60,
       });
     }
@@ -140,7 +130,7 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
       kind: "sleep_check",
       title: "How'd you sleep?",
       body: "Eight to ten hours is the target. Tap to log last night.",
-      target: { screen: "Routine", params: { focus: "sleep" } },
+      target: { screen: "Home" },
       priority: 40,
     });
   }
@@ -149,30 +139,12 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
       kind: "sleep_streak_warning",
       title: "Two short nights",
       body: "Sleep is when your legs actually rebuild. Try for eight tonight.",
-      target: { screen: "Routine", params: { focus: "sleep" } },
+      target: { screen: "Home" },
       priority: 65,
     });
   }
 
   // ---- Habits, only when still missing ------------------------------------
-  if (ctx.hour >= 13 && ctx.hour < 16 && !t.water) {
-    add({
-      kind: "water_midday",
-      title: "Water check",
-      body: "Halfway through the day — had enough yet?",
-      target: { screen: "Routine", params: { focus: "water" } },
-      priority: 55,
-    });
-  }
-  if (ctx.hour >= 17 && ctx.hour < 20 && !t.water) {
-    add({
-      kind: "water_evening",
-      title: "Still no water logged",
-      body: "Even two glasses now helps you tomorrow.",
-      target: { screen: "Routine", params: { focus: "water" } },
-      priority: 58,
-    });
-  }
   if (ctx.hour >= 18 && ctx.hour < 21 && !t.fruits_veggies) {
     add({
       kind: "produce_evening",
@@ -187,7 +159,7 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
       kind: "nothing_logged",
       title: "Nothing logged today",
       body: "Twenty minutes of touches still counts. Start there.",
-      target: { screen: "Routine" },
+      target: { screen: "Home" },
       priority: 72,
     });
   }
@@ -198,7 +170,7 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
       kind: "streak_at_risk",
       title: `${ctx.streakDays} days straight`,
       body: "Don't break it tonight — one item keeps it alive.",
-      target: { screen: "Routine" },
+      target: { screen: "Home" },
       priority: 96,
     });
   }
@@ -207,7 +179,7 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
       kind: "welcome_back",
       title: "Missed you",
       body: "One thing today, that's all. Pick the easiest one.",
-      target: { screen: "Routine" },
+      target: { screen: "Home" },
       priority: 68,
     });
   }
@@ -216,7 +188,7 @@ export function evaluate(ctx: NudgeContext): Nudge[] {
       kind: "week_target_close",
       title: "One more session this week",
       body: "That's your three days hit.",
-      target: { screen: "Routine" },
+      target: { screen: "Home" },
       priority: 50,
     });
   }

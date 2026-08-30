@@ -315,3 +315,8 @@ ALTER TABLE routine_logs
   -- 'health' when read from a device, 'manual' when the student tapped it.
   ADD COLUMN IF NOT EXISTS active_source  TEXT,
   ADD COLUMN IF NOT EXISTS sleep_source   TEXT;
+
+-- When the day's exercise actually happened. A daily total cannot tell whether a
+-- session was warmed up for; the timestamp of the longest bout can.
+ALTER TABLE routine_logs
+  ADD COLUMN IF NOT EXISTS exercise_at TIMESTAMPTZ;

@@ -218,7 +218,18 @@ router.put(
   "/health-sync",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { active_minutes, sleep_hours } = req.body ?? {};
+    const { active_minutes, sleep_hours, exercise_at } = req.body ?? {};
+
+    // When the exercise happened, so it can be matched against that day's
+    // session. Optional: an older client sends only totals.
+    let exerciseAt: Date | null = null;
+    if (typeof exercise_at === "string" && exercise_at.trim()) {
+      const parsed = new Date(exercise_at);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new HttpError(400, "exercise_at must be an ISO timestamp.");
+      }
+      exerciseAt = parsed;
+    }
 
     const minutes =
       active_minutes === undefined || active_minutes === null
@@ -233,8 +244,8 @@ router.put(
     if (hours !== null && (!Number.isFinite(hours) || hours < 0 || hours > 24)) {
       throw new HttpError(400, "sleep_hours must be between 0 and 24.");
     }
-    if (minutes === null && hours === null) {
-      throw new HttpError(400, "Provide active_minutes or sleep_hours.");
+    if (minutes === null && hours === null && exerciseAt === null) {
+      throw new HttpError(400, "Provide active_minutes, sleep_hours or exercise_at.");
     }
 
     // What the student has already set by hand today.
@@ -260,6 +271,9 @@ router.put(
         push("active_play", Math.round(minutes) >= ACTIVE_MINUTES_TARGET);
         push("active_source", "health");
       }
+    }
+    if (exerciseAt !== null) {
+      push("exercise_at", exerciseAt.toISOString());
     }
     if (hours !== null) {
       push("sleep_hours", hours);
@@ -292,6 +306,33 @@ router.put(
       // So the client can explain why a manual choice was left alone.
       skipped_manual: { active_play: activeIsManual, sleep: sleepIsManual },
     });
+  })
+);
+
+// What today looks like once every item is derived from evidence rather than
+// self-reported. Read-only by design: there is nothing here a student can tick.
+router.get(
+  "/derived",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const requested = req.query.student_id;
+    let targetId = req.user!.userId;
+
+    if (requested !== undefined && requested !== "") {
+      if (!isUuid(requested)) {
+        throw new HttpError(400, "student_id must be a valid id.");
+      }
+      if (requested !== req.user!.userId) {
+        if (req.user!.role !== "coach") {
+          throw new HttpError(403, "You can only view your own day.");
+        }
+        await assertCoachOwnsStudent(req.user!.userId, requested);
+      }
+      targetId = requested;
+    }
+
+    const { loadDerivedDay } = await import("../services/derivedDay");
+    res.json(await loadDerivedDay(targetId));
   })
 );
 

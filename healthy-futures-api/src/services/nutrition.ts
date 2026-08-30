@@ -10,8 +10,13 @@ export type RecipeAnalysis = {
   nutrition: Record<string, string | number | null> | null;
   recommended_portion: string | null;
   timing_note: string | null;
-  ingredient_benefits: { ingredient: string; benefits: string[] }[];
+  // Swaps a young athlete could actually make — the practical takeaway, not just
+  // a score. Kept deliberately: this is the coaching value of the companion.
   ingredient_substitutions: string[];
+  // Why the good parts of this meal are good — teaches the pattern rather than
+  // just grading it.
+  ingredient_benefits: { ingredient: string; benefits: string[] }[];
+  // Short at-a-glance tags, e.g. "high protein", "good pre-training".
   health_labels: string[];
   warnings: string[];
   summary: string | null;
@@ -49,6 +54,9 @@ const SCHEMA = {
     },
     ingredient_benefits: {
       type: "array",
+      description:
+        "Up to three ingredients actually visible in the meal, each with one or two " +
+        "short reasons it helps a young athlete. Empty if nothing stands out.",
       items: {
         type: "object",
         properties: {
@@ -59,8 +67,22 @@ const SCHEMA = {
         additionalProperties: false,
       },
     },
-    ingredient_substitutions: { type: "array", items: { type: "string" } },
-    health_labels: { type: "array", items: { type: "string" } },
+    health_labels: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Up to four two-or-three-word tags describing the meal, e.g. 'high protein', " +
+        "'good recovery fuel', 'low fibre'. Empty when nothing is notable.",
+    },
+    ingredient_substitutions: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Up to three concrete swaps that would raise the score, each phrased as a " +
+        "single short sentence a young athlete could act on today — e.g. " +
+        "'Swap the white roll for wholegrain to keep energy steadier'. Empty when " +
+        "the meal is already a strong choice.",
+    },
     warnings: {
       type: "array",
       items: { type: "string" },
@@ -76,8 +98,8 @@ const SCHEMA = {
     "nutrition",
     "recommended_portion",
     "timing_note",
-    "ingredient_benefits",
     "ingredient_substitutions",
+    "ingredient_benefits",
     "health_labels",
     "warnings",
     "summary",
@@ -260,6 +282,13 @@ export function summarizeForChat(a: RecipeAnalysis, label: string): string {
   }
   if (a.recommended_portion) lines.push(`• Portion: ${a.recommended_portion}`);
   if (a.timing_note) lines.push(`• Timing: ${a.timing_note}`);
+  if (a.health_labels.length > 0) lines.push(`• ${a.health_labels.join(" · ")}`);
+  for (const b of a.ingredient_benefits.slice(0, 2)) {
+    lines.push(`• ${b.ingredient}: ${b.benefits.join(", ")}`);
+  }
+  for (const swap of a.ingredient_substitutions.slice(0, 3)) {
+    lines.push(`• Swap: ${swap}`);
+  }
   if (a.warnings.length > 0) lines.push(`⚠️ ${a.warnings.join("; ")}`);
   return lines.join("\n");
 }
