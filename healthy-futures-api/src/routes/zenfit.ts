@@ -117,7 +117,25 @@ router.post(
       detail: `Feeling ${moodValue}, energy ${energyValue}/5`,
     });
 
-    res.json({ checkin: result.rows[0] });
+    // Return the running points so the student sees the reward for checking in,
+    // which is the whole point: they get credit for showing up, not for feeling a
+    // particular way.
+    const { POINTS_PER_CHECKIN, CHARACTER_POINTS_TARGET } = await import("./criteria");
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS checkins FROM zenfit_checkins
+       WHERE user_id = $1 AND created_at >= date_trunc('month', CURRENT_DATE)`,
+      [req.user!.userId]
+    );
+    const checkins = countResult.rows[0]?.checkins ?? 0;
+    const characterPoints = checkins * POINTS_PER_CHECKIN;
+
+    res.json({
+      checkin: result.rows[0],
+      characterPoints,
+      pointsEarned: POINTS_PER_CHECKIN,
+      characterPointsTarget: CHARACTER_POINTS_TARGET,
+      characterMet: characterPoints >= CHARACTER_POINTS_TARGET,
+    });
   })
 );
 

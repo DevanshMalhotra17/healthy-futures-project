@@ -20,12 +20,21 @@ import {
   RoutineField,
   RoutineSummary,
   RoutineItem,
+  syncHealth,
 } from "@/api/routines";
 import { CheckIcon, FlameIcon } from "@/components/Icons";
+import { isHealthAvailable, readToday } from "@/utils/health";
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { RootTabParamList } from "@/navigation/RootNavigator";
 
-export default function RoutineScreen() {
+type Props = BottomTabScreenProps<RootTabParamList, "Routine">;
+
+export default function RoutineScreen({ route }: Props) {
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
+  // A nudge about one habit ("had your water?") highlights that row so the
+  // student sees what it meant without hunting for it.
+  const focus = route.params?.focus;
   const [data, setData] = useState<RoutineSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -50,6 +59,32 @@ export default function RoutineScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Pull exercise minutes and sleep from the device once per mount. Best-effort:
+  // the routine screen must work identically on Android, in Expo Go, and for
+  // anyone who declines Health access.
+  useEffect(() => {
+    if (!token || !isHealthAvailable()) return;
+    let cancelled = false;
+    (async () => {
+      const result = await readToday();
+      if (cancelled || !result.ok) return;
+      const { activeMinutes, sleepHours } = result.reading;
+      if (activeMinutes === null && sleepHours === null) return;
+      try {
+        const synced = await syncHealth(
+          { active_minutes: activeMinutes, sleep_hours: sleepHours },
+          token
+        );
+        if (!cancelled) setData((cur) => (cur ? { ...cur, today: synced.today } : cur));
+      } catch {
+        // Leave the manually-loaded day in place.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -102,10 +137,30 @@ export default function RoutineScreen() {
 
   function renderItem(item: RoutineItem) {
     const checked = Boolean(today?.[item.key]);
+
+    // Show the real number when a device supplied it, so a student can see the
+    // tick wasn't guessed — and that tapping overrides it.
+    let measured: string | null = null;
+    if (item.key === "active_play" && today?.active_minutes != null) {
+      measured =
+        today.active_source === "health"
+          ? `${today.active_minutes} min from Apple Health`
+          : `${today.active_minutes} min measured · you set this`;
+    }
+    if (item.key === "sleep" && today?.sleep_hours != null) {
+      measured =
+        today.sleep_source === "health"
+          ? `${today.sleep_hours} h from Apple Health`
+          : `${today.sleep_hours} h measured · you set this`;
+    }
     return (
       <Pressable
         key={item.key}
-        style={[styles.item, checked && styles.itemChecked]}
+        style={[
+          styles.item,
+          checked && styles.itemChecked,
+          focus === item.key && !checked && styles.itemFocused,
+        ]}
         onPress={() => toggle(item.key)}
         disabled={saving !== null}
       >
@@ -119,6 +174,7 @@ export default function RoutineScreen() {
         <View style={{ flex: 1 }}>
           <Text style={[styles.itemLabel, checked && styles.itemLabelChecked]}>{item.label}</Text>
           <Text style={styles.itemHint}>{item.hint}</Text>
+          {measured && <Text style={styles.itemMeasured}>{measured}</Text>}
         </View>
       </Pressable>
     );
@@ -251,6 +307,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   itemChecked: { borderColor: colors.pitch, backgroundColor: "#F2F7F3" },
+  itemFocused: { borderColor: colors.gold, borderWidth: 2, backgroundColor: colors.goldSoft },
   box: {
     width: 24,
     height: 24,
@@ -264,4 +321,10 @@ const styles = StyleSheet.create({
   itemLabel: { fontFamily: fonts.bodyBold, fontSize: 13.5, color: colors.ink },
   itemLabelChecked: { color: colors.pitchDark },
   itemHint: { fontFamily: fonts.body, fontSize: 11.5, color: colors.inkSoft, marginTop: 2 },
+  itemMeasured: {
+    fontFamily: fonts.mono,
+    fontSize: 9.5,
+    color: colors.pitch,
+    marginTop: 3,
+  },
 });

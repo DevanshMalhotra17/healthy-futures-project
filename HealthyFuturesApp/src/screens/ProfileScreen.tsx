@@ -9,13 +9,23 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { colors, radius, spacing, fonts } from "@/theme";
+import { API_BASE_URL } from "@/api/client";
 import { coachTitle } from "@/utils/greeting";
 import FaceEnrollment from "@/components/FaceEnrollment";
 import { useAuth } from "@/state/AuthContext";
-import { Role } from "@/api/auth";
+import {
+  Role,
+  deleteAccount,
+  requestPasswordReset,
+  confirmPasswordReset,
+} from "@/api/auth";
 import { CheckIcon } from "@/components/Icons";
 
 export default function ProfileScreen() {
@@ -33,7 +43,10 @@ export default function ProfileScreen() {
     logout,
   } = useAuth();
 
-  const [mode, setMode] = useState<"login" | "signup">("signup");
+  const [mode, setMode] = useState<"login" | "signup" | "forgot">("signup");
+  const [resetCode, setResetCode] = useState("");
+  const [resetSent, setResetSent] = useState(false);
+  const [resetNote, setResetNote] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -43,7 +56,64 @@ export default function ProfileScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDeleteAccount() {
+    if (!token || !deletePassword || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAccount(deletePassword, token);
+      // The account is gone, so clearing local session state is all that's left.
+      await logout();
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Couldn't delete the account.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleForgot() {
+    if (submitting) return;
+    if (!email.trim()) {
+      setError("Enter your email address.");
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      if (!resetSent) {
+        const { message } = await requestPasswordReset(email.trim());
+        setResetSent(true);
+        setResetNote(message);
+      } else {
+        if (!resetCode.trim()) {
+          setError("Enter the code from your email.");
+          return;
+        }
+        if (password.length < 8) {
+          setError("New password must be at least 8 characters.");
+          return;
+        }
+        await confirmPasswordReset(email.trim(), resetCode.trim(), password);
+        // Straight into the app with the new password.
+        await login(email.trim(), password);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleSubmit() {
+    if (mode === "forgot") {
+      await handleForgot();
+      return;
+    }
     if (submitting) return;
     if (!email.trim() || !password) {
       setError("Enter an email and password.");
@@ -135,6 +205,64 @@ export default function ProfileScreen() {
           <Pressable style={styles.logoutBtn} onPress={() => logout()}>
             <Text style={styles.logoutBtnText}>Log out</Text>
           </Pressable>
+
+          <Pressable
+            style={styles.policyBtn}
+            onPress={() => Linking.openURL(`${API_BASE_URL.replace(/\/api$/, "")}/privacy`)}
+          >
+            <Text style={styles.policyText}>Privacy policy</Text>
+          </Pressable>
+
+          <View style={styles.dangerZone}>
+            <Text style={styles.dangerTitle}>Delete account</Text>
+            <Text style={styles.dangerBody}>
+              This removes your account and everything in it — check-ins, routines, messages,
+              practice clips and any face data. It can't be undone.
+            </Text>
+
+            {!deleteMode ? (
+              <Pressable style={styles.dangerBtn} onPress={() => setDeleteMode(true)}>
+                <Text style={styles.dangerBtnText}>Delete my account</Text>
+              </Pressable>
+            ) : (
+              <>
+                <Text style={styles.fieldLabel}>Confirm your password</Text>
+                <TextInput
+                  style={styles.input}
+                  value={deletePassword}
+                  onChangeText={setDeletePassword}
+                  secureTextEntry
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.inkSoft}
+                />
+                {deleteError && <Text style={styles.error}>{deleteError}</Text>}
+                <View style={styles.dangerRow}>
+                  <Pressable
+                    style={styles.dangerCancel}
+                    onPress={() => {
+                      setDeleteMode(false);
+                      setDeletePassword("");
+                      setDeleteError(null);
+                    }}
+                    disabled={deleting}
+                  >
+                    <Text style={styles.dangerCancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.dangerConfirm, !deletePassword && styles.dangerConfirmOff]}
+                    onPress={handleDeleteAccount}
+                    disabled={deleting || !deletePassword}
+                  >
+                    {deleting ? (
+                      <ActivityIndicator size="small" color={colors.white} />
+                    ) : (
+                      <Text style={styles.dangerConfirmText}>Delete forever</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
         </View>
       </ScrollView>
     );
@@ -150,10 +278,16 @@ export default function ProfileScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.container}>
-          <Text style={styles.title}>{mode === "signup" ? "Create account" : "Log in"}</Text>
+          <Text style={styles.title}>
+            {mode === "signup" ? "Create account" : mode === "forgot" ? "Reset password" : "Log in"}
+          </Text>
           <Text style={styles.sub}>
             {mode === "signup"
               ? "Set up your Healthy Futures account to save your progress and unlock the AI companions."
+              : mode === "forgot"
+              ? resetSent
+                ? "Enter the code we emailed you and pick a new password."
+                : "We'll email you a code to get back into your account."
               : "Welcome back."}
           </Text>
 
@@ -185,17 +319,42 @@ export default function ProfileScreen() {
             />
           </View>
 
-          <View style={styles.field}>
-            <Text style={styles.fieldLabel}>Password</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              placeholder="••••••••"
-              placeholderTextColor={colors.inkSoft}
-            />
-          </View>
+          {mode === "forgot" && resetSent && (
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Code from your email</Text>
+              <TextInput
+                style={styles.input}
+                value={resetCode}
+                onChangeText={setResetCode}
+                keyboardType="number-pad"
+                maxLength={6}
+                placeholder="123456"
+                placeholderTextColor={colors.inkSoft}
+              />
+            </View>
+          )}
+
+          {/* No password field while only asking for the code. */}
+          {(mode !== "forgot" || resetSent) && (
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>
+                {mode === "forgot" ? "New password" : "Password"}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                placeholder="••••••••"
+                placeholderTextColor={colors.inkSoft}
+              />
+              {mode === "forgot" && <Text style={styles.hint}>At least 8 characters.</Text>}
+            </View>
+          )}
+
+          {resetNote && mode === "forgot" && (
+            <Text style={styles.noteText}>{resetNote}</Text>
+          )}
 
           {mode === "signup" && (
             <View style={styles.field}>
@@ -256,7 +415,13 @@ export default function ProfileScreen() {
               <ActivityIndicator color={colors.white} />
             ) : (
               <Text style={styles.submitBtnText}>
-                {mode === "signup" ? "Create account" : "Log in"}
+                {mode === "signup"
+                  ? "Create account"
+                  : mode === "forgot"
+                  ? resetSent
+                    ? "Set new password"
+                    : "Email me a code"
+                  : "Log in"}
               </Text>
             )}
           </Pressable>
@@ -266,6 +431,9 @@ export default function ProfileScreen() {
             onPress={() => {
               setMode((m) => (m === "signup" ? "login" : "signup"));
               setError(null);
+              setResetSent(false);
+              setResetNote(null);
+              setResetCode("");
             }}
           >
             <Text style={styles.switchModeText}>
@@ -274,6 +442,35 @@ export default function ProfileScreen() {
                 : "Need an account? Sign up"}
             </Text>
           </Pressable>
+
+          {mode === "login" && (
+            <Pressable
+              style={styles.switchModeBtn}
+              onPress={() => {
+                setMode("forgot");
+                setError(null);
+                setPassword("");
+              }}
+            >
+              <Text style={styles.forgotText}>Forgot your password?</Text>
+            </Pressable>
+          )}
+
+          {mode === "forgot" && (
+            <Pressable
+              style={styles.switchModeBtn}
+              onPress={() => {
+                setMode("login");
+                setError(null);
+                setResetSent(false);
+                setResetNote(null);
+                setResetCode("");
+                setPassword("");
+              }}
+            >
+              <Text style={styles.forgotText}>Back to log in</Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -342,6 +539,19 @@ const styles = StyleSheet.create({
 
   switchModeBtn: { marginTop: 16, alignItems: "center" },
   switchModeText: { fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.pitch },
+  forgotText: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.inkSoft },
+  policyBtn: { marginTop: spacing.md, alignSelf: "flex-start" },
+  policyText: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.pitch },
+  pickerDoneBtn: { marginTop: 8, alignSelf: "flex-end" },
+  pickerDoneText: { fontFamily: fonts.bodyExtraBold, fontSize: 12.5, color: colors.pitch },
+  hint: { fontFamily: fonts.body, fontSize: 11, color: colors.inkSoft, marginTop: 5 },
+  noteText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.pitch,
+    marginTop: 14,
+    lineHeight: 17,
+  },
 
   accountCard: {
     marginTop: 20,
@@ -379,4 +589,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logoutBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 13, color: colors.danger },
+
+  dangerZone: {
+    marginTop: spacing.xl,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  dangerTitle: { fontFamily: fonts.bodyExtraBold, fontSize: 13, color: colors.danger },
+  dangerBody: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: colors.inkSoft,
+    marginTop: 5,
+    lineHeight: 16,
+  },
+  dangerBtn: { marginTop: spacing.sm, alignSelf: "flex-start" },
+  dangerBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 12, color: colors.danger },
+  dangerRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  dangerCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerCancelText: { fontFamily: fonts.bodyExtraBold, fontSize: 12, color: colors.inkSoft },
+  dangerConfirm: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    backgroundColor: colors.danger,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerConfirmOff: { opacity: 0.4 },
+  dangerConfirmText: { fontFamily: fonts.bodyExtraBold, fontSize: 12, color: colors.white },
 });

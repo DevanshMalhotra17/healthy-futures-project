@@ -33,6 +33,12 @@ export type ActivityEntry = {
   score: number | null;
   detail: string | null;
   createdAt: string;
+  // The session on the same day, when there was one, so a coach can tell whether
+  // a meal was logged before practice.
+  sessionStartsAt?: string | null;
+  sessionTitle?: string | null;
+  // Positive = logged this many minutes before the session started.
+  minutesBeforeSession?: number | null;
 };
 
 export type ActivitySummary = {
@@ -56,6 +62,18 @@ export async function getFaceDb(
 ): Promise<{ student_id: string; embedding: number[] }[]> {
   const data = await apiGet<{ faces: { student_id: string; embedding: number[] }[] }>(
     "/soccer/face-db",
+    token
+  );
+  return data.faces || [];
+}
+
+// A student's own face signature only — used when a student analyses their own
+// clip so the analyser can identify them without seeing the rest of the roster.
+export async function getMyFaceDb(
+  token?: string | null
+): Promise<{ student_id: string; embedding: number[] }[]> {
+  const data = await apiGet<{ faces: { student_id: string; embedding: number[] }[] }>(
+    "/soccer/face-db/me",
     token
   );
   return data.faces || [];

@@ -15,10 +15,16 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.tachyonleap.healthyfutures",
+      "entitlements": {
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "Healthy Futures uses your camera to record practice clips to send to your coach.",
         "NSMicrophoneUsageDescription": "Healthy Futures uses your microphone to record audio with your practice clips.",
-        "NSPhotoLibraryUsageDescription": "Healthy Futures needs access to your library to choose a practice video to send."
+        "NSPhotoLibraryUsageDescription": "Healthy Futures needs access to your library to choose a practice video to send.",
+        "NSSpeechRecognitionUsageDescription": "Healthy Futures turns your speech into text so you can talk to your AI assistant instead of typing.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -27,9 +33,10 @@
       },
       "package": "com.tachyonleap.healthyfutures",
       "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO",
-        "READ_MEDIA_VIDEO"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "plugins": [
@@ -43,7 +50,31 @@
       ],
       "expo-font",
       "@react-native-community/datetimepicker",
-      "expo-video"
-    ]
+      "expo-video",
+      "expo-audio",
+      "expo-notifications",
+      "expo-asset",
+      [
+        "@jamsch/expo-speech-recognition",
+        {
+          "microphonePermission": "Healthy Futures uses your microphone so you can talk to your AI assistant instead of typing.",
+          "speechRecognitionPermission": "Healthy Futures turns your speech into text so you can talk to your AI assistant instead of typing."
+        }
+      ],
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Healthy Futures reads your exercise minutes and sleep so your routine fills in automatically instead of you logging it by hand.",
+          "NSHealthUpdateUsageDescription": "Healthy Futures does not write anything to Apple Health. Apple requires this permission whenever an app includes the Health framework, which we use only to read your exercise minutes and sleep.",
+          "background": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2e50cfc2-3a16-4999-b32f-563441cd4de3"
+      }
+    },
+    "owner": "devanshm17s-team"
   }
 }

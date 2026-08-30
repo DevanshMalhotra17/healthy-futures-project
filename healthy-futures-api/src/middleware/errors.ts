@@ -41,6 +41,20 @@ export function errorHandler(
     return;
   }
 
+  // Multer signals an oversized upload with its own error shape; without this
+  // the client gets a generic 500 and can't say the clip was too big.
+  if (typeof err === "object" && err !== null && "code" in err) {
+    const code = (err as { code?: string }).code;
+    if (code === "LIMIT_FILE_SIZE") {
+      res.status(413).json({ error: "That clip is too large — keep it under 200 MB." });
+      return;
+    }
+    if (code === "LIMIT_UNEXPECTED_FILE" || code === "LIMIT_FILE_COUNT") {
+      res.status(400).json({ error: "Send one clip at a time." });
+      return;
+    }
+  }
+
   // Log only the message — pg error objects carry the failing query and its
   // bound parameters, which can include credentials and other PII.
   const message = err instanceof Error ? err.message : String(err);

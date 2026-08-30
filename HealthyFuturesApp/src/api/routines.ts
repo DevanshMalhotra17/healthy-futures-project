@@ -10,7 +10,15 @@ export type RoutineField =
   | "breakfast"
   | "sleep";
 
-export type RoutineDay = Record<RoutineField, boolean> & { log_date: string | null };
+export type RoutineDay = Record<RoutineField, boolean> & {
+  log_date: string | null;
+  // Measured values behind active_play and sleep. "health" means a device supplied
+  // it; "manual" means the student set it, and a later sync won't overwrite it.
+  active_minutes?: number | null;
+  sleep_hours?: number | null;
+  active_source?: "health" | "manual" | null;
+  sleep_source?: "health" | "manual" | null;
+};
 
 export type RoutineSummary = {
   today: RoutineDay;
@@ -55,4 +63,19 @@ export async function getHistory(
 ): Promise<{ days: (RoutineDay & { log_date: string })[] } & Omit<RoutineSummary, "today">> {
   const query = studentId ? `?student_id=${encodeURIComponent(studentId)}` : "";
   return apiGet(`/routines/history${query}`, token);
+}
+
+export type HealthSyncResult = {
+  today: RoutineDay;
+  applied: { active_play: boolean; sleep: boolean };
+  skipped_manual: { active_play: boolean; sleep: boolean };
+};
+
+// Pushes measured values from the device's health store. The server only flips a
+// boolean when the student hasn't already set that item by hand.
+export async function syncHealth(
+  input: { active_minutes?: number | null; sleep_hours?: number | null },
+  token?: string | null
+): Promise<HealthSyncResult> {
+  return apiPut<HealthSyncResult>("/routines/health-sync", input, token);
 }

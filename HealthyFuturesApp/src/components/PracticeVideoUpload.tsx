@@ -3,21 +3,23 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput } from 
 import * as ImagePicker from "expo-image-picker";
 import { colors, radius, spacing, fonts } from "@/theme";
 import { useAuth } from "@/state/AuthContext";
-import { getUploadUrl, uploadVideoFile, recordVideo } from "@/api/videos";
+import { uploadPracticeVideo, MAX_VIDEO_BYTES } from "@/api/videos";
+import { ApiError } from "@/api/client";
 import { UploadIcon, CheckIcon } from "@/components/Icons";
 
 type Status = "idle" | "picked" | "uploading" | "saving" | "done" | "error";
+type Picked = { uri: string; name?: string; mimeType?: string | null };
 
 export default function PracticeVideoUpload() {
   const { token } = useAuth();
   const [status, setStatus] = useState<Status>("idle");
-  const [pickedUri, setPickedUri] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const [caption, setCaption] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   function reset() {
     setStatus("idle");
-    setPickedUri(null);
+    setPicked(null);
     setCaption("");
     setErrorMsg(null);
   }
@@ -39,9 +41,20 @@ export default function PracticeVideoUpload() {
           ? await ImagePicker.launchCameraAsync({ mediaTypes: ["videos"], videoMaxDuration: 60 })
           : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["videos"] });
 
-      if (result.canceled || !result.assets?.[0]?.uri) return;
+      const asset = result.canceled ? null : result.assets?.[0];
+      if (!asset?.uri) return;
 
-      setPickedUri(result.assets[0].uri);
+      if (asset.fileSize && asset.fileSize > MAX_VIDEO_BYTES) {
+        setStatus("error");
+        setErrorMsg("That clip is over 200 MB. Record a shorter one.");
+        return;
+      }
+
+      setPicked({
+        uri: asset.uri,
+        name: asset.fileName ?? undefined,
+        mimeType: asset.mimeType,
+      });
       setStatus("picked");
     } catch {
       setStatus("error");
@@ -50,7 +63,7 @@ export default function PracticeVideoUpload() {
   }
 
   async function handleSend() {
-    if (!pickedUri) return;
+    if (!picked) return;
     if (!token) {
       setStatus("error");
       setErrorMsg("Log in to send a video to your coach.");
@@ -59,17 +72,17 @@ export default function PracticeVideoUpload() {
 
     try {
       setStatus("uploading");
-      const contentType = "video/mp4";
-      const { uploadUrl, key } = await getUploadUrl(contentType, token);
-      await uploadVideoFile(uploadUrl, pickedUri, contentType);
-
-      setStatus("saving");
-      await recordVideo(key, caption.trim(), token);
-
+      await uploadPracticeVideo(picked, caption, token);
       setStatus("done");
-    } catch {
+    } catch (error) {
       setStatus("error");
-      setErrorMsg("Upload didn't go through. Check your connection and try again.");
+      // Relay the server's own reason (too large, wrong format, not a student)
+      // instead of blaming the connection for every failure.
+      setErrorMsg(
+        error instanceof ApiError
+          ? error.message
+          : "Upload didn't go through. Check your connection and try again."
+      );
     }
   }
 
@@ -99,7 +112,7 @@ export default function PracticeVideoUpload() {
         Record yourself working on a drill at home and send it straight to your coach.
       </Text>
 
-      {!pickedUri ? (
+      {!picked ? (
         <View style={styles.pickRow}>
           <Pressable style={styles.pickBtn} onPress={() => pick("camera")}>
             <UploadIcon size={14} color={colors.pitch} />

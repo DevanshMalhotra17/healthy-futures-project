@@ -17,6 +17,8 @@ import DateTimePicker, {
   DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { colors, radius, spacing, fonts } from "@/theme";
+import MonthCalendar, { dayKey } from "@/components/MonthCalendar";
+import ScheduleImport from "@/components/ScheduleImport";
 import { useAuth } from "@/state/AuthContext";
 import {
   listSessions,
@@ -27,6 +29,8 @@ import {
   setAttendance,
   TrainingSession,
   AttendanceRow,
+  RepeatRule,
+  AttendanceStatus,
 } from "@/api/sessions";
 import { CheckIcon } from "@/components/Icons";
 
@@ -44,6 +48,8 @@ export default function ScheduleScreen() {
 
   const [editing, setEditing] = useState<TrainingSession | null>(null);
   const [creating, setCreating] = useState(false);
+  const [calMonth, setCalMonth] = useState(() => new Date());
+  const [selectedDay, setSelectedDay] = useState<Date | null>(() => new Date());
 
   const [openSessionId, setOpenSessionId] = useState<string | null>(null);
   const [attendance, setAttendance_] = useState<AttendanceRow[]>([]);
@@ -92,12 +98,25 @@ export default function ScheduleScreen() {
     }
   }
 
+  // Tapping cycles absent -> present -> excused -> absent, so all three states
+  // are reachable from one control without a separate menu.
+  const NEXT_STATUS: Record<AttendanceStatus, AttendanceStatus> = {
+    absent: "present",
+    present: "excused",
+    excused: "absent",
+  };
+
   async function togglePresent(sessionId: string, row: AttendanceRow) {
     if (!token || savingStudent) return;
-    const next = !row.present;
+    const next = NEXT_STATUS[row.status];
+    const prev = row.status;
     setSavingStudent(row.studentId);
     setAttendance_((rows) =>
-      rows.map((r) => (r.studentId === row.studentId ? { ...r, present: next } : r))
+      rows.map((r) =>
+        r.studentId === row.studentId
+          ? { ...r, status: next, present: next === "present" }
+          : r
+      )
     );
     try {
       await setAttendance(sessionId, row.studentId, next, token);
@@ -105,7 +124,11 @@ export default function ScheduleScreen() {
       setError(null);
     } catch {
       setAttendance_((rows) =>
-        rows.map((r) => (r.studentId === row.studentId ? { ...r, present: !next } : r))
+        rows.map((r) =>
+          r.studentId === row.studentId
+            ? { ...r, status: prev, present: prev === "present" }
+            : r
+        )
       );
       setError("Couldn't save that attendance change.");
     } finally {
@@ -154,7 +177,19 @@ export default function ScheduleScreen() {
 
   const now = Date.now();
   const upcoming = sessions.filter((s) => new Date(s.startsAt).getTime() >= now);
-  const past = sessions.filter((s) => new Date(s.startsAt).getTime() < now);
+
+  // Calendar view: one dot per session per day, and tapping a day filters below.
+  const counts: Record<string, number> = {};
+  for (const s of sessions) {
+    const k = dayKey(new Date(s.startsAt));
+    counts[k] = (counts[k] ?? 0) + 1;
+  }
+  const selectedKey = selectedDay ? dayKey(selectedDay) : null;
+  const daySessions = selectedKey
+    ? sessions
+        .filter((s) => dayKey(new Date(s.startsAt)) === selectedKey)
+        .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+    : [];
 
   return (
     <>
@@ -175,9 +210,12 @@ export default function ScheduleScreen() {
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           {isCoach && (
-            <Pressable style={styles.addBtn} onPress={() => setCreating(true)}>
-              <Text style={styles.addBtnText}>+ Add session</Text>
-            </Pressable>
+            <>
+              <Pressable style={styles.addBtn} onPress={() => setCreating(true)}>
+                <Text style={styles.addBtnText}>+ Add session</Text>
+              </Pressable>
+              <ScheduleImport onImported={load} />
+            </>
           )}
 
           {sessions.length === 0 ? (
@@ -191,48 +229,68 @@ export default function ScheduleScreen() {
             </View>
           ) : (
             <>
-              {upcoming.length > 0 && (
-                <>
-                  <Text style={styles.sectionLabel}>Upcoming</Text>
-                  <View style={styles.group}>
-                    {upcoming.map((s) => (
-                      <SessionCard
-                        key={s.id}
-                        session={s}
-                        isCoach={isCoach}
-                        expanded={openSessionId === s.id}
-                        attendance={attendance}
-                        loadingAttendance={loadingAttendance}
-                        savingStudent={savingStudent}
-                        onToggleAttendance={() => openAttendance(s)}
-                        onTogglePresent={(row) => togglePresent(s.id, row)}
-                        onEdit={() => setEditing(s)}
-                        onDelete={() => confirmDelete(s)}
-                      />
-                    ))}
-                  </View>
-                </>
+              <MonthCalendar
+                month={calMonth}
+                selected={selectedDay}
+                counts={counts}
+                onSelect={setSelectedDay}
+                onMonthChange={setCalMonth}
+              />
+
+              <Text style={styles.sectionLabel}>
+                {selectedDay
+                  ? selectedDay.toLocaleDateString(undefined, {
+                      weekday: "long",
+                      month: "long",
+                      day: "numeric",
+                    })
+                  : "Select a day"}
+              </Text>
+
+              {daySessions.length === 0 ? (
+                <Text style={styles.dayEmpty}>
+                  {isCoach
+                    ? "Nothing scheduled. Tap “Add session” to put one here."
+                    : "No sessions on this day."}
+                </Text>
+              ) : (
+                <View style={styles.group}>
+                  {daySessions.map((s) => (
+                    <SessionCard
+                      key={s.id}
+                      session={s}
+                      isCoach={isCoach}
+                      expanded={openSessionId === s.id}
+                      attendance={attendance}
+                      loadingAttendance={loadingAttendance}
+                      savingStudent={savingStudent}
+                      onToggleAttendance={() => openAttendance(s)}
+                      onTogglePresent={(row) => togglePresent(s.id, row)}
+                      onEdit={() => setEditing(s)}
+                      onDelete={() => confirmDelete(s)}
+                    />
+                  ))}
+                </View>
               )}
 
-              {past.length > 0 && (
+              {/* Next session regardless of the month being viewed, so a student
+                  never has to hunt for it. */}
+              {upcoming.length > 0 && (
                 <>
-                  <Text style={styles.sectionLabel}>Past</Text>
+                  <Text style={styles.sectionLabel}>Next up</Text>
                   <View style={styles.group}>
-                    {past.map((s) => (
-                      <SessionCard
-                        key={s.id}
-                        session={s}
-                        isCoach={isCoach}
-                        expanded={openSessionId === s.id}
-                        attendance={attendance}
-                        loadingAttendance={loadingAttendance}
-                        savingStudent={savingStudent}
-                        onToggleAttendance={() => openAttendance(s)}
-                        onTogglePresent={(row) => togglePresent(s.id, row)}
-                        onEdit={() => setEditing(s)}
-                        onDelete={() => confirmDelete(s)}
-                      />
-                    ))}
+                    <SessionCard
+                      session={upcoming[0]}
+                      isCoach={isCoach}
+                      expanded={openSessionId === upcoming[0].id}
+                      attendance={attendance}
+                      loadingAttendance={loadingAttendance}
+                      savingStudent={savingStudent}
+                      onToggleAttendance={() => openAttendance(upcoming[0])}
+                      onTogglePresent={(row) => togglePresent(upcoming[0].id, row)}
+                      onEdit={() => setEditing(upcoming[0])}
+                      onDelete={() => confirmDelete(upcoming[0])}
+                    />
                   </View>
                 </>
               )}
@@ -347,6 +405,10 @@ function SessionCard({
             </Text>
           ) : (
             <>
+              <Text style={styles.attendanceHint}>
+                Tap a name to cycle absent → present → excused. Excused sessions don't
+                count against attendance.
+              </Text>
               {attendance.map((row) => (
                 <Pressable
                   key={row.studentId}
@@ -356,21 +418,29 @@ function SessionCard({
                 >
                   <Text style={styles.attendanceName}>{row.fullName}</Text>
                   <View
-                    style={[styles.presentBtn, row.present && styles.presentBtnOn]}
+                    style={[
+                      styles.presentBtn,
+                      row.status === "present" && styles.presentBtnOn,
+                      row.status === "excused" && styles.excusedBtnOn,
+                    ]}
                   >
                     {savingStudent === row.studentId ? (
                       <ActivityIndicator
                         size="small"
-                        color={row.present ? colors.white : colors.pitch}
+                        color={row.status === "absent" ? colors.pitch : colors.white}
                       />
                     ) : (
                       <Text
                         style={[
                           styles.presentBtnText,
-                          row.present && styles.presentBtnTextOn,
+                          row.status !== "absent" && styles.presentBtnTextOn,
                         ]}
                       >
-                        {row.present ? "Present" : "Absent"}
+                        {row.status === "present"
+                          ? "Present"
+                          : row.status === "excused"
+                          ? "Excused"
+                          : "Absent"}
                       </Text>
                     )}
                   </View>
@@ -401,18 +471,25 @@ function SessionForm({
     location: string | null;
     startsAt: string;
     endsAt: string | null;
+    repeat?: RepeatRule;
+    repeatCount?: number;
   }) => Promise<void>;
 }) {
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
   const [start, setStart] = useState(() => defaultStart());
   const [end, setEnd] = useState<Date | null>(null);
+  const [repeat, setRepeat] = useState<RepeatRule>("none");
+  const [repeatCount, setRepeatCount] = useState("8");
   const [picker, setPicker] = useState<PickerTarget>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
+    // Editing one occurrence must never silently re-expand the series.
+    setRepeat("none");
+    setRepeatCount("8");
     if (session) {
       setTitle(session.title);
       setLocation(session.location ?? "");
@@ -461,6 +538,9 @@ function SessionForm({
         location: location.trim() || null,
         startsAt: start.toISOString(),
         endsAt: end ? end.toISOString() : null,
+        ...(repeat !== "none"
+          ? { repeat, repeatCount: Math.max(1, Math.min(52, Number(repeatCount) || 8)) }
+          : {}),
       });
     } catch {
       setFormError("Couldn't save that session.");
@@ -489,7 +569,7 @@ function SessionForm({
             style={styles.input}
             value={location}
             onChangeText={setLocation}
-            placeholder="Cooper Field, Trenton"
+            placeholder="e.g. Cooper Field"
             placeholderTextColor={colors.inkSoft}
           />
 
@@ -526,6 +606,54 @@ function SessionForm({
             <Pressable onPress={() => setEnd(null)} style={styles.clearEndBtn}>
               <Text style={styles.clearEndText}>Clear end time</Text>
             </Pressable>
+          )}
+
+          {/* Repeats apply only when creating; editing changes one occurrence. */}
+          {!session && (
+            <>
+              <Text style={styles.fieldLabel}>Is this repeating?</Text>
+              <View style={styles.repeatRow}>
+                {(
+                  [
+                    ["none", "One time"],
+                    ["weekly", "Weekly"],
+                    ["biweekly", "Bi-weekly"],
+                    ["monthly", "Monthly"],
+                  ] as [RepeatRule, string][]
+                ).map(([value, label]) => (
+                  <Pressable
+                    key={value}
+                    style={[styles.repeatChip, repeat === value && styles.repeatChipOn]}
+                    onPress={() => setRepeat(value)}
+                  >
+                    <Text
+                      style={[styles.repeatChipText, repeat === value && styles.repeatChipTextOn]}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {repeat !== "none" && (
+                <>
+                  <Text style={styles.fieldLabel}>How many sessions?</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={repeatCount}
+                    onChangeText={(t) => setRepeatCount(t.replace(/[^0-9]/g, ""))}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    placeholder="8"
+                    placeholderTextColor={colors.inkSoft}
+                  />
+                  <Text style={styles.repeatHint}>
+                    Creates {Math.max(1, Math.min(52, Number(repeatCount) || 8))} sessions. Each
+                    one can be edited or cancelled on its own.
+                  </Text>
+                </>
+              )}
+            </>
           )}
 
           {picker && (
@@ -681,6 +809,13 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   attendanceName: { fontFamily: fonts.body, fontSize: 13, color: colors.ink, flex: 1 },
+  attendanceHint: {
+    fontFamily: fonts.body,
+    fontSize: 10.5,
+    color: colors.inkSoft,
+    marginBottom: 8,
+    lineHeight: 15,
+  },
   presentBtn: {
     width: 78,
     paddingVertical: 7,
@@ -691,6 +826,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   presentBtnOn: { backgroundColor: colors.pitch, borderColor: colors.pitch },
+  excusedBtnOn: { backgroundColor: colors.gold, borderColor: colors.gold },
   presentBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 10.5, color: colors.inkSoft },
   presentBtnTextOn: { color: colors.white },
   attendanceTotal: {
@@ -760,6 +896,32 @@ const styles = StyleSheet.create({
   inputValue: { fontFamily: fonts.body, fontSize: 13.5, color: colors.ink },
   inputPlaceholder: { color: colors.inkSoft },
   clearEndBtn: { alignSelf: "flex-end", paddingVertical: 8, paddingHorizontal: 4 },
+  dayEmpty: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.inkSoft,
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  repeatRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  repeatChip: {
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+  },
+  repeatChipOn: { backgroundColor: colors.pitch, borderColor: colors.pitch },
+  repeatChipText: { fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.ink },
+  repeatChipTextOn: { color: colors.white },
+  repeatHint: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: colors.inkSoft,
+    marginTop: 6,
+    lineHeight: 16,
+  },
   clearEndText: { fontFamily: fonts.bodyBold, fontSize: 11.5, color: colors.inkSoft },
   pickerDoneBtn: {
     alignSelf: "flex-end",

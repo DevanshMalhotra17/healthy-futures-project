@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView } from
 import * as ImagePicker from "expo-image-picker";
 import { colors, radius, fonts } from "@/theme";
 import { useAuth } from "@/state/AuthContext";
+import { me } from "@/api/auth";
 import {
   uploadClip,
   getStatus,
@@ -12,7 +13,13 @@ import {
   Analysis,
   AnalyzedPlayer,
 } from "@/api/soccer";
-import { getFaceDb, getRoster, saveSoccerResult, RosterStudent } from "@/api/coach";
+import {
+  getFaceDb,
+  getMyFaceDb,
+  getRoster,
+  saveSoccerResult,
+  RosterStudent,
+} from "@/api/coach";
 
 const POLL_MS = 5000;
 
@@ -31,6 +38,9 @@ export default function SoccerDetail() {
   const [roster, setRoster] = useState<RosterStudent[]>([]);
   const [assigning, setAssigning] = useState<number | null>(null);
   const [assigned, setAssigned] = useState<Record<number, string>>({});
+  // A student's own id, needed to save a claimed row against their account.
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [claimedId, setClaimedId] = useState<number | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -38,6 +48,11 @@ export default function SoccerDetail() {
       getRoster(token)
         .then(({ students }) => setRoster(students))
         .catch(() => setRoster([]));
+    }
+    if (!isCoach && token) {
+      me(token)
+        .then((r) => setMyUserId(r.user.id))
+        .catch(() => setMyUserId(null));
     }
     return () => {
       if (poll.current) clearInterval(poll.current);
@@ -87,8 +102,14 @@ export default function SoccerDetail() {
     setMessage(null);
 
     try {
-      // Enrolled faces let the analyzer resolve players without a tap.
-      const faceDb = isCoach && token ? await getFaceDb(token).catch(() => []) : [];
+      // Coaches send the whole roster so any player can be matched; a student
+      // sends only their own signature, which is all they're entitled to and all
+      // that's needed to pick them out of the clip.
+      const faceDb = token
+        ? isCoach
+          ? await getFaceDb(token).catch(() => [])
+          : await getMyFaceDb(token).catch(() => [])
+        : [];
       const id = await uploadClip(picked, faceDb);
       setSessionId(id);
       setPhase("processing");
@@ -110,8 +131,31 @@ export default function SoccerDetail() {
         const { status, error } = await getStatus(id);
         if (status === "done") {
           stopPolling();
-          setAnalysis(await getAnalysis(id));
+          const result = await getAnalysis(id);
+          setAnalysis(result);
           setPhase("done");
+
+          // A student's own score is saved automatically so it counts toward their
+          // Effort criterion; a coach's clip is saved per player when they attribute.
+          if (!isCoach && token) {
+            const me = result.players.find((p) => p.student_id !== null);
+            if (me) {
+              saveSoccerResult(
+                {
+                  student_id: me.student_id as string,
+                  session_ref: id,
+                  effort: me.effort,
+                  distance_m: me.distance,
+                  top_speed_ms: me.top_speed,
+                  sprints: me.sprints,
+                  rank_in_clip: me.rank,
+                  players_in_clip: result.player_count,
+                  identified_by: me.identified_by ?? "face",
+                },
+                token
+              ).catch(() => undefined);
+            }
+          }
         } else if (status === "error") {
           stopPolling();
           setPhase("error");
@@ -166,7 +210,53 @@ export default function SoccerDetail() {
     }
   }
 
+  // When the analyser can't match a student's face, they pick their own row. Same
+  // mechanism the coach uses — the tap is on a stats row, not on video.
+  async function claimAsMine(player: AnalyzedPlayer) {
+    if (!token || !sessionId || !analysis || !myUserId) return;
+    setAssigning(player.tracker_id);
+    try {
+      await saveSoccerResult(
+        {
+          student_id: myUserId,
+          session_ref: sessionId,
+          effort: player.effort,
+          distance_m: player.distance,
+          top_speed_ms: player.top_speed,
+          sprints: player.sprints,
+          rank_in_clip: player.rank,
+          players_in_clip: analysis.player_count,
+          identified_by: "self_tap",
+        },
+        token
+      );
+      setClaimedId(player.tracker_id);
+      setMessage(null);
+    } catch {
+      setMessage("Couldn't save that score. Try again.");
+    } finally {
+      setAssigning(null);
+    }
+  }
+
   const busy = phase === "uploading" || phase === "processing";
+
+  const myMatchedRow = analysis?.players.find((p) => p.student_id !== null) ?? null;
+  // Once a student claims a row, show only that one — same end state as a face match.
+  const claimedRow =
+    claimedId !== null
+      ? analysis?.players.find((p) => p.tracker_id === claimedId) ?? null
+      : null;
+  // A student normally sees only themselves. When the analyser couldn't match them,
+  // the anonymous rows have to be visible so they can pick their own.
+  const needsSelfTap = !isCoach && !myMatchedRow && !claimedRow;
+  const visiblePlayers = !analysis
+    ? []
+    : isCoach || needsSelfTap
+    ? analysis.players.slice(0, 12)
+    : claimedRow
+    ? [claimedRow]
+    : analysis.players.filter((p) => p.student_id !== null);
 
   return (
     <View style={styles.panel}>
@@ -233,7 +323,10 @@ export default function SoccerDetail() {
       {phase === "done" && analysis && (
         <View style={styles.resultBlock}>
           <Text style={styles.resultLabel}>
-            {analysis.player_count} players · {analysis.calibrated ? "measured in metres" : "relative effort"}
+            {isCoach
+              ? `${analysis.player_count} players`
+              : "Your effort"}
+            {analysis.calibrated ? " · measured in metres" : " · relative effort"}
           </Text>
           {!analysis.calibrated && (
             <Text style={styles.calNote}>
@@ -242,14 +335,27 @@ export default function SoccerDetail() {
             </Text>
           )}
 
-          {analysis.identification.jersey + analysis.identification.face > 0 && (
+          {isCoach && analysis.identification.jersey + analysis.identification.face > 0 && (
             <Text style={styles.idNote}>
               Auto-matched {analysis.identification.jersey} by number,{" "}
               {analysis.identification.face} by face.
             </Text>
           )}
 
-          {analysis.players.slice(0, 12).map((p) => (
+          {needsSelfTap && visiblePlayers.length > 0 && (
+            <Text style={styles.calNote}>
+              We couldn't recognise your face in this clip. Find your run below and tap
+              "That's me" — your coach can correct it later if needed.
+            </Text>
+          )}
+
+          {!isCoach && !needsSelfTap && visiblePlayers.length === 0 && (
+            <Text style={styles.calNote}>
+              No players were tracked in this clip. Try one with clearer footage.
+            </Text>
+          )}
+
+          {visiblePlayers.map((p) => (
             <View style={styles.playerRow} key={p.tracker_id}>
               <View style={styles.effortBadge}>
                 <Text style={styles.effortValue}>{p.effort}</Text>
@@ -267,6 +373,24 @@ export default function SoccerDetail() {
                     ? `${Math.round(p.distance)}m · ${p.top_speed.toFixed(1)} m/s · ${p.sprints} sprints`
                     : `${p.sprints} bursts · ${p.seconds_tracked}s tracked`}
                 </Text>
+
+                {needsSelfTap && myUserId && (
+                  <Pressable
+                    style={styles.claimBtn}
+                    onPress={() => claimAsMine(p)}
+                    disabled={assigning !== null}
+                  >
+                    {assigning === p.tracker_id ? (
+                      <ActivityIndicator size="small" color={colors.pitchDark} />
+                    ) : (
+                      <Text style={styles.claimBtnText}>That's me</Text>
+                    )}
+                  </Pressable>
+                )}
+
+                {claimedId === p.tracker_id && (
+                  <Text style={styles.assignedNote}>Saved as your score</Text>
+                )}
 
                 {isCoach && !assigned[p.tracker_id] && roster.length > 0 && (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tapRow}>
@@ -428,6 +552,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   tapChipText: { fontFamily: fonts.bodyExtraBold, fontSize: 11, color: colors.pitchDark },
+  claimBtn: {
+    marginTop: 7,
+    alignSelf: "flex-start",
+    backgroundColor: colors.white,
+    borderRadius: radius.pill,
+    paddingHorizontal: 13,
+    paddingVertical: 6,
+  },
+  claimBtnText: { fontFamily: fonts.bodyExtraBold, fontSize: 11, color: colors.pitchDark },
   assignedNote: {
     fontFamily: fonts.bodyBold,
     fontSize: 10.5,

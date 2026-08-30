@@ -24,8 +24,18 @@ import {
 import { ApiError } from "@/api/client";
 import { getRoster, RosterStudent } from "@/api/coach";
 import { coachTitle } from "@/utils/greeting";
+import { MicIcon, SpeakerIcon, StopIcon } from "@/components/Icons";
+import {
+  isSpeechRecognitionAvailable,
+  startListening,
+  speak,
+  stopSpeaking,
+} from "@/utils/voice";
 
-const POLL_INTERVAL_MS = 3000;
+// Two pollers run concurrently (threads + the open thread). The server allows 30
+// message requests a minute, so 3s each (40/min) was tripping the rate limit and
+// making conversations blink out. 6s each keeps the pair at 20/min.
+const POLL_INTERVAL_MS = 6000;
 const AI_EMAIL = "assistant@healthyfutures.app";
 
 export default function MessagesScreen() {
@@ -42,6 +52,23 @@ export default function MessagesScreen() {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<FlatList>(null);
+  // Which thread we last loaded successfully, so a failed poll can tell
+  // "no messages yet" apart from "the request just failed".
+  const loadedThreadRef = useRef<string | null>(null);
+
+  const [voiceMode, setVoiceMode] = useState(true);
+  const [listening, setListening] = useState(false);
+  const [partial, setPartial] = useState("");
+  const [speaking, setSpeaking] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const stopListenRef = useRef<(() => void) | null>(null);
+  // Replies present when the thread opens are history, not new answers — only
+  // messages that arrive after this point get read aloud.
+  const spokenIdsRef = useRef<Set<string>>(new Set());
+  const primedRef = useRef(false);
+
+  const isAiThread = activeThread === AI_EMAIL;
+  const canUseMic = isSpeechRecognitionAvailable();
 
   useEffect(() => {
     if (!token || !isCoach) return;
@@ -99,9 +126,15 @@ export default function MessagesScreen() {
     try {
       const msgs = await loadThread(activeThread, token);
       setMessages(msgs);
-    } catch {
-      // thread may not exist yet (no messages), that's OK
-      setMessages([]);
+      loadedThreadRef.current = activeThread;
+    } catch (e) {
+      // A failed poll must not blank the conversation. Only clear when we've
+      // never successfully loaded this thread — a 404 there means it genuinely
+      // has no messages yet. Anything else (rate limit, timeout, offline) keeps
+      // what's already on screen.
+      if (loadedThreadRef.current !== activeThread) {
+        if (e instanceof ApiError && e.status === 404) setMessages([]);
+      }
     }
   }, [token, activeThread]);
 
@@ -117,20 +150,131 @@ export default function MessagesScreen() {
     return () => clearInterval(interval);
   }, [refreshMessages]);
 
-  async function handleSend() {
-    if (!draft.trim() || sending || !token || !activeThread) return;
-    const content = draft.trim();
-    setDraft("");
+  // Read new assistant replies aloud. The first load only marks what already
+  // exists as seen, so reopening a thread never replays the whole history.
+  useEffect(() => {
+    if (!isAiThread || messages.length === 0) return;
+
+    if (!primedRef.current) {
+      messages.forEach((m) => spokenIdsRef.current.add(m.id));
+      primedRef.current = true;
+      return;
+    }
+
+    const fresh = messages.filter(
+      (m) => m.sender_email === AI_EMAIL && !spokenIdsRef.current.has(m.id)
+    );
+    if (fresh.length === 0) return;
+    fresh.forEach((m) => spokenIdsRef.current.add(m.id));
+
+    if (!voiceMode) return;
+    const latest = fresh[fresh.length - 1];
+    setSpeaking(true);
+    speak(latest.content, () => setSpeaking(false));
+  }, [messages, isAiThread, voiceMode]);
+
+  // Switching threads resets what counts as "already heard".
+  useEffect(() => {
+    primedRef.current = false;
+    spokenIdsRef.current.clear();
+    stopSpeaking();
+    setSpeaking(false);
+    setPartial("");
+    setVoiceError(null);
+  }, [activeThread]);
+
+  // Leaving the screen must not leave the mic open or the voice talking.
+  useEffect(() => {
+    return () => {
+      stopListenRef.current?.();
+      stopSpeaking();
+    };
+  }, []);
+
+  async function deliver(content: string, restoreDraftOnFail: boolean) {
+    if (!token || !activeThread) return;
     setSending(true);
     try {
       await sendMessage(content, activeThread, token);
       await refreshMessages();
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     } catch {
-      setDraft(content);
+      if (restoreDraftOnFail) setDraft(content);
+      else setVoiceError("Couldn't send that. Try again.");
     } finally {
       setSending(false);
     }
+  }
+
+  async function handleSend() {
+    if (!draft.trim() || sending) return;
+    const content = draft.trim();
+    setDraft("");
+    await deliver(content, true);
+  }
+
+  async function handleMicPress() {
+    setVoiceError(null);
+
+    // Tapping while it talks should interrupt, not queue another turn.
+    if (speaking) {
+      stopSpeaking();
+      setSpeaking(false);
+      return;
+    }
+
+    if (listening) {
+      stopListenRef.current?.();
+      stopListenRef.current = null;
+      setListening(false);
+      return;
+    }
+
+    if (!canUseMic) {
+      setVoiceError(
+        "Voice input needs a full build of the app — type your message for now."
+      );
+      return;
+    }
+
+    stopSpeaking();
+    setSpeaking(false);
+    setPartial("");
+    setListening(true);
+
+    try {
+      stopListenRef.current = await startListening({
+        onPartial: setPartial,
+        onFinal: async (text) => {
+          stopListenRef.current?.();
+          stopListenRef.current = null;
+          setListening(false);
+          setPartial("");
+          const spokenText = text.trim();
+          if (spokenText) await deliver(spokenText, false);
+        },
+        onError: (message) => {
+          stopListenRef.current?.();
+          stopListenRef.current = null;
+          setListening(false);
+          setPartial("");
+          if (message) setVoiceError(message);
+        },
+      });
+    } catch {
+      setListening(false);
+      setVoiceError("Couldn't start the microphone.");
+    }
+  }
+
+  function toggleVoiceMode() {
+    setVoiceMode((on) => {
+      if (on) {
+        stopSpeaking();
+        setSpeaking(false);
+      }
+      return !on;
+    });
   }
 
   function switchThread(withEmail: string) {
@@ -210,9 +354,25 @@ export default function MessagesScreen() {
             );
           })}
         </ScrollView>
-        {activeThread && (
-          <Text style={styles.headerSub}>{activeThread}</Text>
-        )}
+        <View style={styles.headerRow}>
+          {activeThread && <Text style={styles.headerSub}>{activeThread}</Text>}
+          {isAiThread && (
+            <Pressable
+              style={[styles.voiceToggle, voiceMode && styles.voiceToggleOn]}
+              onPress={toggleVoiceMode}
+            >
+              <SpeakerIcon
+                size={14}
+                color={voiceMode ? colors.white : colors.inkSoft}
+              />
+              <Text
+                style={[styles.voiceToggleText, voiceMode && styles.voiceToggleTextOn]}
+              >
+                {voiceMode ? "Voice on" : "Voice off"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       <FlatList
@@ -248,7 +408,40 @@ export default function MessagesScreen() {
         }}
       />
 
+      {isAiThread && (listening || speaking || partial || voiceError) && (
+        <View style={styles.voiceStatus}>
+          {listening && (
+            <Text style={styles.voiceStatusText}>
+              {partial ? partial : "Listening…"}
+            </Text>
+          )}
+          {speaking && !listening && (
+            <Text style={styles.voiceStatusText}>Speaking… tap the mic to stop</Text>
+          )}
+          {voiceError && !listening && (
+            <Text style={styles.voiceErrorText}>{voiceError}</Text>
+          )}
+        </View>
+      )}
+
       <View style={styles.composer}>
+        {isAiThread && (
+          <Pressable
+            style={[
+              styles.micBtn,
+              listening && styles.micBtnActive,
+              speaking && styles.micBtnSpeaking,
+            ]}
+            onPress={handleMicPress}
+            disabled={sending}
+          >
+            {speaking ? (
+              <StopIcon size={17} color={colors.white} />
+            ) : (
+              <MicIcon size={19} color={listening ? colors.white : colors.pitch} />
+            )}
+          </Pressable>
+        )}
         <TextInput
           style={styles.input}
           value={draft}
@@ -294,6 +487,57 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     marginTop: 6,
   },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  voiceToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    marginTop: 6,
+  },
+  voiceToggleOn: { backgroundColor: colors.pitch, borderColor: colors.pitch },
+  voiceToggleText: { fontFamily: fonts.bodyBold, fontSize: 11, color: colors.inkSoft },
+  voiceToggleTextOn: { color: colors.white },
+
+  voiceStatus: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 8,
+  },
+  voiceStatusText: {
+    fontFamily: fonts.body,
+    fontSize: 12.5,
+    color: colors.pitch,
+    lineHeight: 17,
+  },
+  voiceErrorText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    color: colors.danger,
+    lineHeight: 17,
+  },
+
+  micBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.card,
+    borderWidth: 1.5,
+    borderColor: colors.pitch,
+  },
+  micBtnActive: { backgroundColor: colors.pitch, borderColor: colors.pitch },
+  micBtnSpeaking: { backgroundColor: colors.danger, borderColor: colors.danger },
 
   tabRow: { flexDirection: "row", marginBottom: 4 },
   tab: {

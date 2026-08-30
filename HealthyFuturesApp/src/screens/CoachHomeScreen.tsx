@@ -14,6 +14,7 @@ import { useAuth } from "@/state/AuthContext";
 import { getRoster, RosterStudent } from "@/api/coach";
 import { PinIcon, ChevronRightIcon } from "@/components/Icons";
 import ProgressRing from "@/components/ProgressRing";
+import CoachVideoInbox from "@/components/CoachVideoInbox";
 import { greetingFor, firstNameOf } from "@/utils/greeting";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { RootTabParamList } from "@/navigation/RootNavigator";
@@ -99,10 +100,15 @@ export default function CoachHomeScreen({ navigation }: Props) {
             <Text style={styles.greetTitle}>
               {greetingFor()},{"\n"}Coach {firstNameOf(fullName)}.
             </Text>
-            <View style={styles.locRow}>
-              <PinIcon size={13} color={colors.inkSoft} />
-              <Text style={styles.locText}>Mentors Matter · Trenton</Text>
-            </View>
+            {total > 0 && (
+              <View style={styles.locRow}>
+                <PinIcon size={13} color={colors.inkSoft} />
+                <Text style={styles.locText}>
+                  {total} athlete{total === 1 ? "" : "s"} · {sessionsHeld} session
+                  {sessionsHeld === 1 ? "" : "s"} held
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -178,6 +184,8 @@ export default function CoachHomeScreen({ navigation }: Props) {
             </View>
           </>
         )}
+
+        <CoachVideoInbox />
 
         <View style={styles.secLabelRow}>
           <Text style={styles.secLabel}>Roster</Text>

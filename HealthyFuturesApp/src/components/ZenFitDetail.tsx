@@ -7,7 +7,7 @@ import {
   TextInput,
   ActivityIndicator,
 } from "react-native";
-import { colors, radius, fonts } from "@/theme";
+import { colors, radius, fonts, spacing } from "@/theme";
 import { useAuth } from "@/state/AuthContext";
 import {
   MOODS,
@@ -25,6 +25,13 @@ export default function ZenFitDetail() {
   const [energy, setEnergy] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  // Shown after a check-in so the reward is immediate and visible.
+  const [points, setPoints] = useState<{
+    total: number;
+    earned: number;
+    target: number;
+    met: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [latest, setLatest] = useState<ZenCheckin | null>(null);
   const [weekCount, setWeekCount] = useState(0);
@@ -55,11 +62,17 @@ export default function ZenFitDetail() {
     setSaving(true);
     setError(null);
     try {
-      const saved = await submitZenCheckin(
+      const result = await submitZenCheckin(
         { mood, energy, note: note.trim() || undefined },
         token
       );
-      setLatest(saved);
+      setLatest(result.checkin);
+      setPoints({
+        total: result.characterPoints,
+        earned: result.pointsEarned,
+        target: result.characterPointsTarget,
+        met: result.characterMet,
+      });
       setWeekCount((c) => c + 1);
       setMood(null);
       setEnergy(null);
@@ -155,6 +168,25 @@ export default function ZenFitDetail() {
       </Pressable>
 
       {error && <Text style={styles.errorText}>{error}</Text>}
+
+      {points && (
+        <View style={styles.pointsBlock}>
+          <Text style={styles.pointsEarned}>+{points.earned} Character Points</Text>
+          <Text style={styles.pointsTotal}>
+            {points.met
+              ? `${points.total} points — character criterion earned!`
+              : `${points.total} of ${points.target} toward your character criterion`}
+          </Text>
+          <View style={styles.pointsBarTrack}>
+            <View
+              style={[
+                styles.pointsBarFill,
+                { width: `${Math.min(100, (points.total / points.target) * 100)}%` },
+              ]}
+            />
+          </View>
+        </View>
+      )}
 
       {latest && (
         <View style={styles.replyBlock}>
@@ -262,6 +294,27 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 
+  pointsBlock: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: radius.sm,
+    padding: 13,
+    marginTop: spacing.md,
+  },
+  pointsEarned: { fontFamily: fonts.bodyExtraBold, fontSize: 14, color: colors.white },
+  pointsTotal: {
+    fontFamily: fonts.body,
+    fontSize: 11.5,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 3,
+  },
+  pointsBarTrack: {
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    marginTop: 9,
+    overflow: "hidden",
+  },
+  pointsBarFill: { height: 5, borderRadius: 3, backgroundColor: colors.gold },
   replyBlock: {
     marginTop: 16,
     paddingTop: 14,

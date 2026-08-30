@@ -6,11 +6,13 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
+  Pressable,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radius, spacing, fonts } from "@/theme";
 import { useAuth } from "@/state/AuthContext";
 import { getRoster, RosterStudent } from "@/api/coach";
+import TrendsSection from "@/components/TrendsSection";
 import { FITNESS_DAYS_TARGET } from "@/api/routines";
 
 const ATTENDANCE_TARGET_PCT = 90;
@@ -23,6 +25,9 @@ export default function CoachRosterScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
+  // Which student's trend charts are expanded; only one at a time keeps the
+  // roster scannable and avoids fetching every student's history at once.
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -97,7 +102,11 @@ export default function CoachRosterScreen() {
         ) : (
           <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
             {students.map((s) => (
-              <View style={styles.card} key={s.id}>
+              <Pressable
+                style={styles.card}
+                key={s.id}
+                onPress={() => setOpenId((cur) => (cur === s.id ? null : s.id))}
+              >
                 <View style={styles.cardTop}>
                   <View style={styles.avatar}>
                     <Text style={styles.avatarText}>{initialsOf(s.fullName)}</Text>
@@ -139,7 +148,13 @@ export default function CoachRosterScreen() {
                   />
                   <Stat label="Criteria" value={`${s.criteriaMetCount}/6`} />
                 </View>
-              </View>
+
+                {openId === s.id ? (
+                  <TrendsSection studentId={s.id} />
+                ) : (
+                  <Text style={styles.tapHint}>Tap to see companion trends</Text>
+                )}
+              </Pressable>
             ))}
           </View>
         )}
@@ -222,6 +237,13 @@ const styles = StyleSheet.create({
   stat: { flex: 1 },
   statValue: { fontFamily: fonts.mono, fontSize: 13.5, color: colors.ink },
   statLabel: { fontFamily: fonts.body, fontSize: 9.5, color: colors.inkSoft, marginTop: 2 },
+  tapHint: {
+    fontFamily: fonts.body,
+    fontSize: 10.5,
+    color: colors.inkSoft,
+    marginTop: 10,
+    textAlign: "center",
+  },
 
   emptyCard: {
     marginTop: spacing.lg,

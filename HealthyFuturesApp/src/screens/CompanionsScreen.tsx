@@ -19,10 +19,12 @@ export default function CompanionsScreen({ route }: Props) {
   const [open, setOpen] = useState<OpenPanel>(null);
 
   useEffect(() => {
-    if (route.params?.openSoccer) {
+    if (route.params?.open) {
+      setOpen(route.params.open);
+    } else if (route.params?.openSoccer) {
       setOpen("soccer");
     }
-  }, [route.params?.openSoccer]);
+  }, [route.params?.open, route.params?.openSoccer]);
 
   function toggle(panel: OpenPanel) {
     setOpen((current) => (current === panel ? null : panel));

@@ -16,8 +16,9 @@ const EXPECTED_CHECKINS_PER_30_DAYS = 8;
 
 // Enough turns for the model to chain a couple of tool calls and still answer.
 const MAX_TURNS = 6;
-// How much prior conversation to send back as context.
-const HISTORY_LIMIT = 20;
+// How much prior conversation to send back as context. Spoken turns are shorter
+// and more frequent than typed ones, so this covers ~20 exchanges rather than 10.
+const HISTORY_LIMIT = 40;
 
 const NOT_CONFIGURED =
   "The assistant isn't configured yet — an ANTHROPIC_API_KEY needs to be set on the " +
@@ -342,7 +343,12 @@ streak, or a nutrition score. When a tool reports something, relay it faithfully
 
 Keep replies to 1-3 short sentences unless asked for detail. You are talking to a young
 athlete or their coach: be encouraging, avoid medical or dietary claims, and never
-diagnose or prescribe.`;
+diagnose or prescribe.
+
+Your replies are often read aloud, so write them to be heard: plain sentences, no
+markdown, no bullet lists, no emoji, and spell out numbers with units the way a person
+would say them ("about 8 out of 10", not "8/10"). If you need to give several items,
+say them in one flowing sentence instead of a list.`;
 }
 
 async function getProgress(
@@ -371,12 +377,13 @@ async function getProgress(
         WHERE l.student_id = $1 AND s.starts_at <= now()) AS held,
        (SELECT COUNT(*)::int FROM checkins c
         JOIN sessions s ON s.id = c.session_id
-        WHERE c.user_id = $1 AND s.starts_at <= now()) AS attended,
+        WHERE c.user_id = $1 AND s.starts_at <= now()
+          AND c.status = 'present') AS attended,
        (SELECT COUNT(*)::int FROM checkins
         WHERE user_id = $1 AND checked_in_at >= now() - interval '30 days') AS recent`,
     [targetId]
   );
-  const { held, attended, recent } = attendance.rows[0];
+  const { held, attended, excused, recent } = attendance.rows[0];
 
   const criteria = await pool.query(
     `SELECT (attitude::int + effort::int + coachability::int + skill::int
@@ -389,7 +396,7 @@ async function getProgress(
 
   const attendanceLine =
     held > 0
-      ? `${Math.round((attended / held) * 100)}% (${attended} of ${held} sessions)`
+      ? `${Math.round((attended / Math.max(held - excused, 1)) * 100)}% (${attended} of ${Math.max(held - excused, 0)} countable sessions${excused ? `, ${excused} excused` : ""})`
       : `${recent} check-in${recent === 1 ? "" : "s"} in 30 days; no sessions scheduled yet`;
 
   return `${targetName}: attendance ${attendanceLine}. Coach-rated criteria met: ${ratedMet}/6.`;

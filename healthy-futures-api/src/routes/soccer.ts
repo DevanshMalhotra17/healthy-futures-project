@@ -100,12 +100,30 @@ router.get(
   })
 );
 
+// A student analysing their own clip gets only their own face signature, so the
+// analyser can pick them out without exposing anyone else's biometric data.
+router.get(
+  "/face-db/me",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const result = await pool.query(
+      "SELECT user_id, embedding FROM face_enrollments WHERE user_id = $1",
+      [req.user!.userId]
+    );
+    res.json({
+      faces: result.rows.map((r) => ({
+        student_id: r.user_id,
+        embedding: r.embedding,
+      })),
+    });
+  })
+);
+
 // --- attributing a clip result to a student --------------------------------
 
 router.post(
   "/results",
   requireAuth,
-  requireRole("coach"),
   asyncHandler(async (req, res) => {
     const {
       student_id,
@@ -122,12 +140,19 @@ router.post(
     if (!isUuid(student_id)) {
       throw new HttpError(400, "student_id must be a valid id.");
     }
-    const link = await pool.query(
-      "SELECT 1 FROM coach_student_links WHERE coach_id = $1 AND student_id = $2",
-      [req.user!.userId, student_id]
-    );
-    if (link.rows.length === 0) {
-      throw new HttpError(403, "That student is not on your roster.");
+    // A coach may save a result for anyone on their roster. A student may save one
+    // only for themselves — that's how their own analysed clip persists without
+    // letting them write scores onto other people's accounts.
+    if (req.user!.role === "coach") {
+      const link = await pool.query(
+        "SELECT 1 FROM coach_student_links WHERE coach_id = $1 AND student_id = $2",
+        [req.user!.userId, student_id]
+      );
+      if (link.rows.length === 0) {
+        throw new HttpError(403, "That student is not on your roster.");
+      }
+    } else if (student_id !== req.user!.userId) {
+      throw new HttpError(403, "You can only save your own result.");
     }
 
     const effortValue = Number(effort);
@@ -172,6 +197,23 @@ router.post(
         : null;
     await logCompanionUse(student_id, "soccer", { score: effortValue, detail });
 
+    // Tell the student their score landed. Best-effort: the result is already saved,
+    // so a messaging or push failure must not fail the request. Skipped when a
+    // student saves their own score — they're already looking at it.
+    if (req.user!.role === "coach") {
+      notifyStudentOfResult(
+        student_id,
+        req.user!.userId,
+        Math.round(effortValue),
+        detail
+      ).catch((error) =>
+        console.error(
+          "Soccer result notification failed:",
+          error instanceof Error ? error.message : String(error)
+        )
+      );
+    }
+
     res.json({ id: result.rows[0].id, createdAt: result.rows[0].created_at });
   })
 );
@@ -215,5 +257,62 @@ router.get(
     res.json({ results: result.rows });
   })
 );
+
+
+// Sends the student a message from their coach and a push notification carrying
+// their new effort score. Runs after the result is committed, so nothing here can
+// roll back a saved score.
+async function notifyStudentOfResult(
+  studentId: string,
+  coachId: string,
+  effort: number,
+  detail: string | null
+): Promise<void> {
+  const people = await pool.query(
+    `SELECT
+       (SELECT email FROM users WHERE id = $1) AS student_email,
+       (SELECT full_name FROM users WHERE id = $2) AS coach_name`,
+    [studentId, coachId]
+  );
+  const studentEmail = people.rows[0]?.student_email as string | undefined;
+  const coachName = (people.rows[0]?.coach_name as string | undefined) ?? "Your coach";
+  if (!studentEmail) return;
+
+  const coachEmailRow = await pool.query("SELECT email FROM users WHERE id = $1", [coachId]);
+  const coachEmail = coachEmailRow.rows[0]?.email as string | undefined;
+  if (!coachEmail) return;
+
+  const firstName = coachName.trim().split(/\s+/)[0];
+  const body = detail
+    ? `Your effort score from the last match clip is ${effort} out of 100. ${detail}.`
+    : `Your effort score from the last match clip is ${effort} out of 100.`;
+
+  await pool.query(
+    `INSERT INTO direct_messages (sender_email, receiver_email, content)
+     VALUES ($1, $2, $3)`,
+    [coachEmail, studentEmail, `Coach ${firstName}: ${body}`]
+  );
+
+  // Push is separate from the nudge engine's daily cap: this is a direct result
+  // the student asked for by playing, not an unprompted reminder.
+  const tokens = await pool.query("SELECT token FROM push_tokens WHERE user_id = $1", [
+    studentId,
+  ]);
+  if (tokens.rowCount === 0) return;
+
+  await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(
+      tokens.rows.map((r) => ({
+        to: r.token,
+        title: "Your effort score is in",
+        body,
+        sound: "default",
+        data: { kind: "soccer_result", screen: "Companions", params: { open: "soccer" } },
+      }))
+    ),
+  });
+}
 
 export default router;

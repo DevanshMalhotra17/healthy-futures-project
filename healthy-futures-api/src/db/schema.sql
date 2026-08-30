@@ -200,3 +200,118 @@ CREATE TABLE IF NOT EXISTS soccer_results (
 
 CREATE INDEX IF NOT EXISTS idx_soccer_results_user
   ON soccer_results(user_id, created_at DESC);
+
+-- Expo push tokens, one row per device. A user may have several (phone + tablet),
+-- and a token can migrate between users on a shared device, so the token is the
+-- primary key rather than the user.
+CREATE TABLE IF NOT EXISTS push_tokens (
+  token       TEXT PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  platform    TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);
+
+-- Every nudge actually sent. This is what enforces the daily cap, the spacing
+-- rule, and "send each nudge kind at most once per day" - so it must be written
+-- even if the push itself fails downstream.
+CREATE TABLE IF NOT EXISTS nudge_log (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,
+  title       TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  screen      TEXT,
+  params      JSONB,
+  sent_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  opened_at   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_nudge_log_user_sent
+  ON nudge_log(user_id, sent_at DESC);
+
+-- Per-student nudge preferences. Absent row means defaults apply.
+CREATE TABLE IF NOT EXISTS nudge_prefs (
+  user_id     UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  enabled     BOOLEAN NOT NULL DEFAULT true,
+  quiet_start SMALLINT NOT NULL DEFAULT 21,
+  quiet_end   SMALLINT NOT NULL DEFAULT 7,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Practice clips a student records at home and sends to their coach. The file
+-- itself lives on disk under VIDEO_STORAGE_DIR; only the relative filename is
+-- stored, so the storage root can move without a migration. These are videos of
+-- minors, so playback is always auth-gated and never a public URL.
+CREATE TABLE IF NOT EXISTS practice_videos (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  filename     TEXT NOT NULL,
+  caption      TEXT,
+  byte_size    BIGINT NOT NULL,
+  mime_type    TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  viewed_at    TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_practice_videos_user
+  ON practice_videos(user_id, created_at DESC);
+
+-- Single-use password reset tokens. Only a SHA-256 hash is stored, so a database
+-- leak can't be used to reset anyone's password. Rows are deleted on use and
+-- swept once expired.
+CREATE TABLE IF NOT EXISTS password_resets (
+  token_hash  TEXT PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+
+-- Per-student details captured once at signup so the companions don't ask for
+-- them every session. `age` is derived from the verified date of birth rather
+-- than typed in, so it can't be inflated to bypass the 13+ age gate.
+CREATE TABLE IF NOT EXISTS user_profile (
+  user_id            UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  age                INTEGER,
+  allergies          TEXT,
+  is_athlete         BOOLEAN,
+  dietary_preference TEXT,
+  full_name          TEXT,
+  phone              TEXT,
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Attendance status. A row still means "the coach recorded something", but
+-- 'excused' is removed from the attendance percentage entirely rather than
+-- counting against the student — a doctor's note shouldn't cost them a level-up.
+ALTER TABLE checkins ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'present';
+ALTER TABLE checkins DROP CONSTRAINT IF EXISTS checkins_status_check;
+ALTER TABLE checkins ADD CONSTRAINT checkins_status_check
+  CHECK (status IN ('present', 'excused'));
+
+-- Character Points. Kids are reluctant to talk about how they feel, so ZenFit
+-- check-ins earn points and the character criterion ticks itself once a threshold
+-- is passed. `character_override` lets a coach force the tick on or off
+-- regardless of points: NULL means "follow the points".
+ALTER TABLE criteria_ratings
+  ADD COLUMN IF NOT EXISTS character_override BOOLEAN;
+
+-- Coach overrides for the auto-scored criteria. NULL means "follow the score";
+-- true/false forces the tick regardless of what the score says.
+ALTER TABLE criteria_ratings
+  ADD COLUMN IF NOT EXISTS effort_override BOOLEAN,
+  ADD COLUMN IF NOT EXISTS skill_override BOOLEAN;
+
+-- Measured values behind two of the routine booleans. HealthKit can supply
+-- exercise minutes and sleep hours; the booleans stay authoritative so Android
+-- users and anyone without a watch keep working exactly as before.
+ALTER TABLE routine_logs
+  ADD COLUMN IF NOT EXISTS active_minutes INTEGER,
+  ADD COLUMN IF NOT EXISTS sleep_hours    REAL,
+  -- 'health' when read from a device, 'manual' when the student tapped it.
+  ADD COLUMN IF NOT EXISTS active_source  TEXT,
+  ADD COLUMN IF NOT EXISTS sleep_source   TEXT;

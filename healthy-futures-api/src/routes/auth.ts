@@ -40,6 +40,7 @@ router.post(
   if (role !== "coach" && role !== "student") {
     throw new HttpError(400, "role must be 'coach' or 'student'.");
   }
+
   const normalizedEmail = String(email).toLowerCase().trim();
   if (normalizedEmail.length > MAX_EMAIL || !EMAIL_RE.test(normalizedEmail)) {
     throw new HttpError(400, "Enter a valid email address.");
@@ -207,6 +208,191 @@ router.get(
         inviteCode,
       },
     });
+  })
+);
+
+const RESET_TTL_MINUTES = 30;
+const RESET_MIN_PASSWORD = 8;
+
+function hashResetCode(code: string): string {
+  return crypto.createHash("sha256").update(code).digest("hex");
+}
+
+// Step 1: ask for a code. The response is deliberately identical whether or not
+// the email exists — otherwise this endpoint becomes a way to enumerate which
+// students have accounts.
+router.post(
+  "/forgot-password",
+  asyncHandler(async (req, res) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    const generic = {
+      sent: true,
+      message: "If that email has an account, a reset code is on its way.",
+    };
+
+    if (!email) {
+      throw new HttpError(400, "Enter your email address.");
+    }
+
+    const { sendPasswordResetEmail, isEmailConfigured } = await import("../services/email");
+    // Checked before the account lookup: if this depended on whether the email
+    // exists, the differing status codes would reveal who has an account.
+    if (!isEmailConfigured()) {
+      throw new HttpError(
+        503,
+        "Password reset isn't available yet — ask your coach to help you get back in."
+      );
+    }
+
+    const found = await pool.query("SELECT id FROM users WHERE lower(email) = $1", [email]);
+    const user = found.rows[0];
+    if (!user) {
+      res.json(generic);
+      return;
+    }
+
+    // 6 digits is enough given the 30-minute expiry, single use, and rate limit
+    // on this route; it's also short enough to read off a phone screen.
+    const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+    const expiresAt = new Date(Date.now() + RESET_TTL_MINUTES * 60_000);
+
+    // Any earlier code for this user stops working the moment a new one is asked
+    // for, so a leaked older email can't be used later.
+    await pool.query("DELETE FROM password_resets WHERE user_id = $1", [user.id]);
+    await pool.query(
+      "INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, $3)",
+      [hashResetCode(code), user.id, expiresAt]
+    );
+
+    const result = await sendPasswordResetEmail(email, code, RESET_TTL_MINUTES);
+    if (!result.ok) {
+      console.error("Password reset email failed:", result.error);
+      throw new HttpError(502, "Couldn't send the reset email. Try again in a minute.");
+    }
+
+    res.json(generic);
+  })
+);
+
+// Step 2: redeem the code and set a new password.
+router.post(
+  "/reset-password",
+  asyncHandler(async (req, res) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+
+    if (!email || !code) {
+      throw new HttpError(400, "Enter your email and the code from your email.");
+    }
+    if (password.length < RESET_MIN_PASSWORD) {
+      throw new HttpError(400, `Password must be at least ${RESET_MIN_PASSWORD} characters.`);
+    }
+
+    const match = await pool.query(
+      `SELECT r.token_hash, r.user_id, r.expires_at
+       FROM password_resets r
+       JOIN users u ON u.id = r.user_id
+       WHERE r.token_hash = $1 AND lower(u.email) = $2`,
+      [hashResetCode(code), email]
+    );
+    const row = match.rows[0];
+    // Same message for a wrong code and an unknown email, so neither can be
+    // probed independently.
+    if (!row) {
+      throw new HttpError(400, "That code isn't valid. Request a new one.");
+    }
+    if (new Date(row.expires_at).getTime() < Date.now()) {
+      await pool.query("DELETE FROM password_resets WHERE token_hash = $1", [row.token_hash]);
+      throw new HttpError(400, "That code has expired. Request a new one.");
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("UPDATE users SET password_hash = $1 WHERE id = $2", [
+        passwordHash,
+        row.user_id,
+      ]);
+      // Single use.
+      await client.query("DELETE FROM password_resets WHERE user_id = $1", [row.user_id]);
+      // Whoever knew the old password loses their sessions too.
+      await client.query("DELETE FROM push_tokens WHERE user_id = $1", [row.user_id]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    res.json({ reset: true });
+  })
+);
+
+// Permanent account deletion. Apple requires any app offering sign-up to offer
+// in-app deletion too, and for minors' data it is the right default regardless.
+// Most tables cascade from users(id), but two things do not: direct_messages is
+// keyed by email with no FK, and practice clips exist as files on disk.
+router.delete(
+  "/account",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { password } = req.body ?? {};
+    if (typeof password !== "string" || !password) {
+      throw new HttpError(400, "Enter your password to confirm deletion.");
+    }
+
+    const found = await pool.query(
+      "SELECT email, password_hash FROM users WHERE id = $1",
+      [req.user!.userId]
+    );
+    const user = found.rows[0];
+    if (!user) {
+      throw new HttpError(404, "That account no longer exists.");
+    }
+
+    // Re-authenticate: a stolen token alone should not be enough to erase data.
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      throw new HttpError(403, "That password doesn't match.");
+    }
+
+    // Collect filenames before the rows cascade away.
+    const clips = await pool.query(
+      "SELECT filename FROM practice_videos WHERE user_id = $1",
+      [req.user!.userId]
+    );
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Not FK-linked, so the cascade won't reach these.
+      await client.query(
+        "DELETE FROM direct_messages WHERE sender_email = $1 OR receiver_email = $1",
+        [user.email]
+      );
+      // Everything else cascades from this single row.
+      await client.query("DELETE FROM users WHERE id = $1", [req.user!.userId]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    // Files last: the rows are already gone, so a failure here leaves orphans
+    // for the retention sweep to collect rather than broken references.
+    if (clips.rowCount) {
+      const { unlinkStoredVideo } = await import("./videos");
+      for (const row of clips.rows) {
+        await unlinkStoredVideo(row.filename as string);
+      }
+    }
+
+    res.json({ deleted: true });
   })
 );
 

@@ -96,12 +96,92 @@ When a meal type and time are given, judge the food in that context — a heavy 
 meal late at night is worse than the same food at lunch, and a snack close to training
 should be light and carb-forward.
 
+When a Timing line gives the gap to that day's session, let it move the score, not just
+the advice. The same food is a different choice at a different hour: something heavy,
+greasy or high-fibre eaten under an hour before training should lose roughly 10 to 20
+points because it will sit badly during a session, while a light carb-forward choice in
+that window should gain a few. After a session, food with real protein and carbs scores
+above the same food eaten at an idle moment. Say why in the timing_note so the athlete
+learns the pattern rather than just seeing a number move.
+
 Favor whole foods, adequate protein for recovery, and hydration. Be encouraging and
 concrete; write for a middle- or high-school reader.
+
+When a photo is provided, the photo is the evidence and any written note is only a
+hint. Score what you can actually see on the plate. If the note claims something the
+image contradicts — "grilled chicken and salad" over a photo of fried food — score the
+food in the picture and say plainly in the summary what you actually see. Never inflate
+a score because the words sounded healthy. If the photo is too dark or blurry to judge,
+set health_score to null and ask for a clearer picture rather than guessing.
 
 You are not a clinician. Do not diagnose, prescribe diets, or reference specific
 medical conditions. If the input is not food, set health_score to null and say so
 in the summary.`;
+
+
+// Turns the gap to practice into a phrase the model can reason about. Windows are
+// what matter for fuelling: eating 30 minutes before a session is a different
+// judgment from eating three hours before, even for identical food.
+function describeSessionTiming(
+  minutesToSession?: number | null,
+  sessionTitle?: string | null
+): string | null {
+  if (minutesToSession === undefined || minutesToSession === null) return null;
+  const label = sessionTitle ?? "training";
+  const mins = Math.round(minutesToSession);
+
+  if (mins < 0) {
+    const after = Math.abs(mins);
+    if (after <= 90) {
+      return `Timing: eaten ${after} minutes AFTER ${label} finished — judge this as recovery fuel (protein and carbs both matter here).`;
+    }
+    return `Timing: eaten ${Math.round(after / 60)} hours after ${label}.`;
+  }
+  if (mins <= 45) {
+    return `Timing: eaten only ${mins} minutes BEFORE ${label} — too close to train on anything heavy, fatty or high-fibre. Light and carb-forward is what works.`;
+  }
+  if (mins <= 180) {
+    return `Timing: eaten ${mins} minutes before ${label} — a good pre-training window for a balanced meal.`;
+  }
+  return `Timing: eaten ${Math.round(mins / 60)} hours before ${label}.`;
+}
+
+// When a photo is present the image leads and the caption follows, because the
+// model should judge the plate it can see and treat the words as a hint.
+function buildContent(
+  recipeText: string,
+  details: string,
+  imageBase64?: string,
+  imageMediaType?: string
+) {
+  const written = recipeText.trim();
+  const caption = written
+    ? `The athlete's note about this meal: "${written}". Treat it as a hint only — if the photo disagrees, trust the photo and say so.`
+    : "The athlete gave no note. Judge only what you can see.";
+
+  if (!imageBase64) {
+    return `Analyze this food:\n${written}${details ? `\n\n${details}` : ""}`;
+  }
+
+  return [
+    {
+      type: "image" as const,
+      source: {
+        type: "base64" as const,
+        media_type: (imageMediaType ?? "image/jpeg") as
+          | "image/jpeg"
+          | "image/png"
+          | "image/gif"
+          | "image/webp",
+        data: imageBase64,
+      },
+    },
+    {
+      type: "text" as const,
+      text: `Analyze the food in this photo.\n\n${caption}${details ? `\n\n${details}` : ""}`,
+    },
+  ];
+}
 
 export async function analyzeRecipe(
   recipeText: string,
@@ -112,6 +192,14 @@ export async function analyzeRecipe(
     dietaryPreference?: string;
     mealType?: MealType;
     snackTime?: string;
+    // Minutes until that day's session (negative = already finished). Lets the
+    // model judge fuelling against real practice time instead of guessing.
+    minutesToSession?: number | null;
+    sessionTitle?: string | null;
+    // A photo of the actual plate. Scoring from the image is what stops a
+    // student typing "salad" and eating chips.
+    imageBase64?: string;
+    imageMediaType?: string;
   } = {}
 ): Promise<RecipeAnalysis> {
   const client = getClient();
@@ -129,6 +217,7 @@ export async function analyzeRecipe(
     opts.age ? `Athlete's age: ${opts.age}` : null,
     opts.allergies ? `Allergies or foods to avoid: ${opts.allergies}` : null,
     opts.dietaryPreference ? `Dietary preference: ${opts.dietaryPreference}` : null,
+    describeSessionTiming(opts.minutesToSession, opts.sessionTitle),
   ]
     .filter(Boolean)
     .join("\n");
@@ -141,7 +230,7 @@ export async function analyzeRecipe(
     messages: [
       {
         role: "user",
-        content: `Analyze this food:\n${recipeText}${details ? `\n\n${details}` : ""}`,
+        content: buildContent(recipeText, details, opts.imageBase64, opts.imageMediaType),
       },
     ],
   });

@@ -8,8 +8,9 @@ import ProgressRing from "@/components/ProgressRing";
 import CompanionCard from "@/components/CompanionCard";
 import HealthScoreCard from "@/components/HealthScoreCard";
 import PracticeVideoUpload from "@/components/PracticeVideoUpload";
+import TrendsSection from "@/components/TrendsSection";
 import { useAuth } from "@/state/AuthContext";
-import { greetingFor, firstNameOf } from "@/utils/greeting";
+import { greetingFor, firstNameOf, coachTitle } from "@/utils/greeting";
 import { getCriteria, CriteriaCard } from "@/api/criteria";
 import { getToday, FITNESS_DAYS_TARGET } from "@/api/routines";
 import { listSessions, TrainingSession } from "@/api/sessions";
@@ -20,7 +21,7 @@ type Props = BottomTabScreenProps<RootTabParamList, "Home">;
 
 export default function HomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { fullName, token } = useAuth();
+  const { fullName, token, coach } = useAuth();
   const [card, setCard] = useState<CriteriaCard | null>(null);
   const [routine, setRoutine] = useState<{ fitnessDays: number; streak: number } | null>(null);
   const [upcoming, setUpcoming] = useState<TrainingSession[]>([]);
@@ -75,10 +76,12 @@ export default function HomeScreen({ navigation }: Props) {
               {greetingFor()},{"\n"}
               {firstNameOf(fullName)}.
             </Text>
-            <View style={styles.locRow}>
-              <PinIcon size={13} color={colors.inkSoft} />
-              <Text style={styles.locText}>Mentors Matter · Trenton</Text>
-            </View>
+            {coach && (
+              <View style={styles.locRow}>
+                <PinIcon size={13} color={colors.inkSoft} />
+                <Text style={styles.locText}>{coachTitle(coach.fullName)}</Text>
+              </View>
+            )}
           </View>
           {routine !== null && routine.streak > 0 && (
             <View style={styles.streakChip}>
@@ -112,6 +115,8 @@ export default function HomeScreen({ navigation }: Props) {
 
         {/* Practice video upload */}
         <View style={{ marginTop: spacing.md }}>
+          <TrendsSection />
+
           <PracticeVideoUpload />
         </View>
 

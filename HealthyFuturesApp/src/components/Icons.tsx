@@ -159,6 +159,60 @@ export function MessageIcon({ size = 21, color = "#5B6C61", strokeWidth = 1.8 }:
   );
 }
 
+export function MicIcon({ size = 20, color = "#5B6C61", strokeWidth = 1.9 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Path d="M6 11a6 6 0 0 0 12 0" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Line
+        x1={12}
+        y1={17}
+        x2={12}
+        y2={20.5}
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export function SpeakerIcon({ size = 18, color = "#5B6C61", strokeWidth = 1.9 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M4 9.5h3L11.5 6v12L7 14.5H4a.5.5 0 0 1-.5-.5v-4a.5.5 0 0 1 .5-.5Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <Path d="M15 9.2a4 4 0 0 1 0 5.6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path d="M17.8 6.6a7.5 7.5 0 0 1 0 10.8" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function PlayIcon({ size = 14, color = "#5B6C61" }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M8 5.5v13l11-6.5-11-6.5Z" fill={color} />
+    </Svg>
+  );
+}
+
+export function StopIcon({ size = 18, color = "#5B6C61" }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={6.5} y={6.5} width={11} height={11} rx={2} fill={color} />
+    </Svg>
+  );
+}
+
 // Center-circle "pitch ring" divider line used inside ProgressRing
 export function PitchHalfLine({ size = 104, color = "rgba(255,255,255,0.12)" }: IconProps & { size?: number }) {
   return (

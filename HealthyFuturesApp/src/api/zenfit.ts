@@ -26,10 +26,19 @@ export async function getZenHistory(
   return apiGet("/zenfit", token);
 }
 
+export type ZenCheckinResult = {
+  checkin: ZenCheckin;
+  // Character Points reward the act of checking in, so students get credit for
+  // showing up rather than for reporting a particular mood.
+  characterPoints: number;
+  pointsEarned: number;
+  characterPointsTarget: number;
+  characterMet: boolean;
+};
+
 export async function submitZenCheckin(
   input: { mood: Mood; energy: number; note?: string },
   token?: string | null
-): Promise<ZenCheckin> {
-  const data = await apiPost<{ checkin: ZenCheckin }>("/zenfit", input, token);
-  return data.checkin;
+): Promise<ZenCheckinResult> {
+  return apiPost<ZenCheckinResult>("/zenfit", input, token);
 }

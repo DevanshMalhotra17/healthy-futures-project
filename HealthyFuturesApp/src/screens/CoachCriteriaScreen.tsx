@@ -19,9 +19,30 @@ import {
   ActivitySummary,
   COMPANION_LABELS,
 } from "@/api/coach";
-import { getCriteria, rateCriteria, CriteriaCard, RatedCriterion } from "@/api/criteria";
+import {
+  getCriteria,
+  rateCriteria,
+  CriteriaCard,
+  RatedCriterion,
+  AutoCriterion,
+} from "@/api/criteria";
 import { getHistory, FITNESS_DAYS_TARGET } from "@/api/routines";
 import { CheckIcon } from "@/components/Icons";
+
+// A meal only tells the coach something once it's placed against practice —
+// "ate at 4:10pm" matters because the session kicked off at 4:40pm.
+function timingNote(entry: ActivityEntry): { text: string; before: boolean } | null {
+  const mins = entry.minutesBeforeSession;
+  if (mins === null || mins === undefined) return null;
+  const label = entry.sessionTitle ?? "practice";
+  if (mins > 0) {
+    const gap = mins >= 90 ? `${Math.round(mins / 60)}h` : `${mins} min`;
+    return { text: `${gap} before ${label}`, before: true };
+  }
+  const after = Math.abs(mins);
+  const gap = after >= 90 ? `${Math.round(after / 60)}h` : `${after} min`;
+  return { text: `${gap} after ${label}`, before: false };
+}
 
 export default function CoachCriteriaScreen() {
   const insets = useSafeAreaInsets();
@@ -88,6 +109,27 @@ export default function CoachCriteriaScreen() {
     setSavingKey(key);
     try {
       setCard(await rateCriteria(selectedId, { [key]: !current }, token));
+      setError(null);
+    } catch {
+      setError("Couldn't save that rating.");
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  // Cycles: following the score -> forced on -> forced off -> following again.
+  // A coach who disagrees with the automatic result can always have the last word.
+  async function overrideAuto(
+    key: AutoCriterion,
+    item: { met: boolean; auto: boolean }
+  ) {
+    if (!token || !selectedId || savingKey) return;
+    const next: boolean | null = item.auto ? !item.met : item.met ? false : null;
+    setSavingKey(key);
+    try {
+      setCard(
+        await rateCriteria(selectedId, { [`${key}_override`]: next }, token)
+      );
       setError(null);
     } catch {
       setError("Couldn't save that rating.");
@@ -204,7 +246,12 @@ export default function CoachCriteriaScreen() {
             <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
               {card.items.map((item) => {
                 const isSaving = savingKey === item.key;
-                if (item.auto) {
+                // Attendance is measured and can't be overridden. Character, effort
+                // and skill are auto-scored but the coach's judgment still wins.
+                const overridable =
+                  item.key === "character" || item.key === "effort" || item.key === "skill";
+
+                if (item.auto && !overridable) {
                   return (
                     <View key={item.key} style={[styles.item, styles.itemAuto]}>
                       <View style={[styles.box, item.met && styles.boxChecked, styles.boxAuto]}>
@@ -216,6 +263,35 @@ export default function CoachCriteriaScreen() {
                       </View>
                       <Text style={styles.autoTag}>AUTO</Text>
                     </View>
+                  );
+                }
+
+                if (overridable) {
+                  return (
+                    <Pressable
+                      key={item.key}
+                      style={[styles.item, item.met && styles.itemChecked]}
+                      onPress={() => overrideAuto(item.key as AutoCriterion, item)}
+                      disabled={savingKey !== null}
+                    >
+                      <View style={[styles.box, item.met && styles.boxChecked]}>
+                        {isSaving ? (
+                          <ActivityIndicator
+                            size="small"
+                            color={item.met ? colors.white : colors.pitch}
+                          />
+                        ) : (
+                          item.met && <CheckIcon size={12} color={colors.white} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.itemLabel}>{item.label}</Text>
+                        <Text style={styles.itemHint}>{item.detail}</Text>
+                      </View>
+                      <Text style={item.auto ? styles.autoTag : styles.manualTag}>
+                        {item.auto ? "AUTO" : "COACH"}
+                      </Text>
+                    </Pressable>
                   );
                 }
                 return (
@@ -288,7 +364,10 @@ export default function CoachCriteriaScreen() {
                 </View>
 
                 <View style={{ marginTop: spacing.sm }}>
-                  {activity.slice(0, 8).map((a) => (
+                  {activity.slice(0, 8).map((a) => {
+                    const when = new Date(a.createdAt);
+                    const timing = timingNote(a);
+                    return (
                     <View style={styles.activityRow} key={a.id}>
                       <Text style={styles.activityCompanion}>
                         {COMPANION_LABELS[a.companion]}
@@ -300,14 +379,29 @@ export default function CoachCriteriaScreen() {
                           </Text>
                         )}
                         <Text style={styles.activityDate}>
-                          {new Date(a.createdAt).toLocaleDateString()}
+                          {when.toLocaleDateString()} ·{" "}
+                          {when.toLocaleTimeString([], {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
                         </Text>
+                        {timing && (
+                          <Text
+                            style={[
+                              styles.activityTiming,
+                              timing.before ? styles.timingBefore : styles.timingAfter,
+                            ]}
+                          >
+                            {timing.text}
+                          </Text>
+                        )}
                       </View>
                       {a.score !== null && (
                         <Text style={styles.activityScore}>{a.score}</Text>
                       )}
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </>
             )}
@@ -410,6 +504,12 @@ const styles = StyleSheet.create({
   itemLabel: { fontFamily: fonts.bodyBold, fontSize: 13.5, color: colors.ink },
   itemHint: { fontFamily: fonts.body, fontSize: 11, color: colors.inkSoft, marginTop: 2 },
   autoTag: { fontFamily: fonts.mono, fontSize: 9, color: colors.inkSoft, letterSpacing: 0.8 },
+  manualTag: {
+    fontFamily: fonts.mono,
+    fontSize: 8.5,
+    color: colors.gold,
+    letterSpacing: 0.6,
+  },
 
   noteLabel: { fontFamily: fonts.display, fontSize: 15, color: colors.ink, marginTop: 26 },
   noteInput: {
@@ -473,5 +573,8 @@ const styles = StyleSheet.create({
   },
   activityDetail: { fontFamily: fonts.body, fontSize: 12, color: colors.ink },
   activityDate: { fontFamily: fonts.body, fontSize: 10, color: colors.inkSoft, marginTop: 1 },
+  activityTiming: { fontFamily: fonts.bodyBold, fontSize: 9.5, marginTop: 2 },
+  timingBefore: { color: colors.pitch },
+  timingAfter: { color: "#8A5F14" },
   activityScore: { fontFamily: fonts.mono, fontSize: 14, color: colors.pitch },
 });

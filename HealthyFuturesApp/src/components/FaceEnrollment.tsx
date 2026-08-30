@@ -93,7 +93,7 @@ export default function FaceEnrollment() {
   function confirmRemove() {
     Alert.alert(
       "Remove face data?",
-      "Your face data will be deleted. Your coach will assign match results manually instead.",
+      "Your face data will be deleted. Because a match photo is required, you'll be asked to add a new one next time you open the app.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -121,7 +121,7 @@ export default function FaceEnrollment() {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>Match photo (optional)</Text>
+      <Text style={styles.title}>Match photo</Text>
 
       {enrolled ? (
         <>
@@ -140,8 +140,8 @@ export default function FaceEnrollment() {
       ) : (
         <>
           <Text style={styles.body}>
-            Adding a photo lets your coach match you in match clips without picking you from a
-            list. It's optional — everything works without it.
+            Your coach uses this to match you in match footage. It's required for student
+            accounts.
           </Text>
           <Text style={styles.privacy}>
             Only a numeric signature is stored, never the photo itself. You can delete it at any
