@@ -4,9 +4,9 @@ import { pool } from "../db/pool";
 // Self-reporting was the weak link: a tick cost nothing and proved nothing. Each
 // item is now earned from evidence the app already collects.
 //
-//   exercise  Apple Health exercise minutes
-//   stretch   Apple Health exercise recorded close to that day's session
-//   sleep     Apple Health sleep hours
+//   exercise  exercise minutes from the device health app
+//   stretch   exercise recorded close to that day's session
+//   sleep     sleep hours from the device health app
 //   practice  a practice clip sent to the coach (ball control / touches)
 //   meals     a nutrition photo scored by the companion
 //   breakfast a nutrition photo logged before that day's session
@@ -96,15 +96,15 @@ export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
 
   const items: DerivedItem[] = [];
 
-  // 1. Exercise — straight from Apple Health.
+  // 1. Exercise — straight from the device (HealthKit on iOS, Health Connect on Android).
   items.push({
     key: "exercise",
     label: "Exercise",
     met: activeMinutes !== null && activeMinutes >= ACTIVE_MINUTES_TARGET,
     detail:
       activeMinutes === null
-        ? "Waiting for Apple Health"
-        : `${activeMinutes} min of ${ACTIVE_MINUTES_TARGET} from Apple Health`,
+        ? "Waiting for your health app"
+        : `${activeMinutes} min of ${ACTIVE_MINUTES_TARGET} measured`,
   });
 
   // 2. Warm-up / cool-down — exercise recorded near the session. On a day with
@@ -112,7 +112,7 @@ export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
   let stretchMet = false;
   let stretchDetail: string;
   if (activeMinutes === null || activeMinutes <= 0) {
-    stretchDetail = "Waiting for Apple Health";
+    stretchDetail = "Waiting for your health app";
   } else if (!sessionStartsAt) {
     stretchMet = true;
     stretchDetail = "Exercise recorded — no session scheduled today";
@@ -125,7 +125,7 @@ export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
   } else {
     // Minutes but no timestamp (older client): credit it rather than punish.
     stretchMet = true;
-    stretchDetail = "Exercise recorded from Apple Health";
+    stretchDetail = "Exercise recorded";
   }
   items.push({
     key: "stretch",
@@ -134,15 +134,15 @@ export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
     detail: stretchDetail,
   });
 
-  // 3. Sleep — straight from Apple Health.
+  // 3. Sleep — straight from the device health app.
   items.push({
     key: "sleep",
     label: "Sleep",
     met: sleepHours !== null && sleepHours >= SLEEP_HOURS_TARGET,
     detail:
       sleepHours === null
-        ? "Waiting for Apple Health"
-        : `${hoursLabel(sleepHours)} of ${SLEEP_HOURS_TARGET} h from Apple Health`,
+        ? "Waiting for your health app"
+        : `${hoursLabel(sleepHours)} of ${SLEEP_HOURS_TARGET} h measured`,
   });
 
   // 4. At-home ball work — proven by a clip, not a tick.

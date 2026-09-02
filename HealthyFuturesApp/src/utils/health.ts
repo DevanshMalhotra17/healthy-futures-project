@@ -39,7 +39,14 @@ const SLEEP_ANALYSIS = "HKCategoryTypeIdentifierSleepAnalysis";
 // Counting only asleep values avoids crediting time spent lying awake.
 const ASLEEP_VALUES = new Set([1, 3, 4, 5]);
 
+// True when this device has some health source we can read. iOS uses HealthKit,
+// Android uses Health Connect; callers don't need to know which.
 export function isHealthAvailable(): boolean {
+  if (Platform.OS === "android") {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { isHealthConnectAvailable } = require("./healthConnect");
+    return isHealthConnectAvailable();
+  }
   return health !== null;
 }
 
@@ -57,13 +64,16 @@ export type HealthReading = {
 export async function readToday(): Promise<
   { ok: true; reading: HealthReading } | { ok: false; reason: string }
 > {
+  if (Platform.OS === "android") {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { readTodayAndroid } = require("./healthConnect");
+    return readTodayAndroid();
+  }
+
   if (!health) {
     return {
       ok: false,
-      reason:
-        Platform.OS === "ios"
-          ? "Apple Health needs a full build of the app."
-          : "Apple Health isn't available on this device.",
+      reason: "Apple Health needs a full build of the app.",
     };
   }
 

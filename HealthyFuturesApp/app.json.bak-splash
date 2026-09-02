@@ -7,8 +7,6 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
       "backgroundColor": "#123626"
     },
     "assetBundlePatterns": [
@@ -31,7 +29,6 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#123626"
       },
       "package": "com.tachyonleap.healthyfutures",
@@ -39,20 +36,10 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.health.READ_EXERCISE",
-        "android.permission.health.READ_SLEEP"
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "plugins": [
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "minSdkVersion": 26
-          }
-        }
-      ],
       [
         "expo-image-picker",
         {
@@ -81,8 +68,7 @@
           "NSHealthUpdateUsageDescription": "Healthy Futures does not write anything to Apple Health. Apple requires this permission whenever an app includes the Health framework, which we use only to read your exercise minutes and sleep.",
           "background": false
         }
-      ],
-      "react-native-health-connect"
+      ]
     ],
     "extra": {
       "eas": {

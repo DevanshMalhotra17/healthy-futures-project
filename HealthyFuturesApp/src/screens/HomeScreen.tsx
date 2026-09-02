@@ -86,7 +86,7 @@ export default function HomeScreen({ navigation }: Props) {
           )}
         </View>
 
-        {/* Today, derived from Apple Health, practice clips and meal photos.
+        {/* Today, derived from the device health app, practice clips and meal photos.
             Read-only on purpose: nothing here can simply be ticked. */}
         <View style={styles.ringCard}>
           <ProgressRing
@@ -102,7 +102,7 @@ export default function HomeScreen({ navigation }: Props) {
             <Text style={styles.ringSub}>
               {day?.session_title
                 ? `Measured around ${day.session_title}.`
-                : "Filled in from Apple Health, clips and meal photos."}
+                : "Filled in from your health app, clips and meal photos."}
             </Text>
           </View>
         </View>
