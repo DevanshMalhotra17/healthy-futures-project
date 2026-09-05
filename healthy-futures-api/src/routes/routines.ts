@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../db/pool";
 import { requireAuth } from "../middleware/auth";
 import { asyncHandler, isUuid, HttpError } from "../middleware/errors";
+import { resolveTimeZone } from "../utils/timezone";
 
 const router = Router();
 
@@ -218,7 +219,10 @@ router.put(
   "/health-sync",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { active_minutes, sleep_hours, exercise_at } = req.body ?? {};
+    const { active_minutes, sleep_hours, exercise_at, tz } = req.body ?? {};
+    // Which calendar day this reading belongs to, in the athlete's zone. Without
+    // it an evening sync in the Americas writes to tomorrow's row.
+    const zone = resolveTimeZone(tz);
 
     // When the exercise happened, so it can be matched against that day's
     // session. Optional: an older client sends only totals.
@@ -251,8 +255,9 @@ router.put(
     // What the student has already set by hand today.
     const existing = await pool.query(
       `SELECT active_play, sleep, active_source, sleep_source
-       FROM routine_logs WHERE user_id = $1 AND log_date = CURRENT_DATE`,
-      [req.user!.userId]
+       FROM routine_logs
+       WHERE user_id = $1 AND log_date = (now() AT TIME ZONE $2)::date`,
+      [req.user!.userId, zone]
     );
     const row = existing.rows[0];
     const activeIsManual = row?.active_source === "manual";
@@ -285,14 +290,16 @@ router.put(
 
     const assignments = columns.map((c, i) => `${c} = $${i + 2}`).join(", ");
     const placeholders = columns.map((_, i) => `$${i + 2}`).join(", ");
+    // The zone goes last so the generated $2..$n column placeholders above stay put.
+    const zoneParam = `$${columns.length + 2}`;
     const saved = await pool.query(
       `INSERT INTO routine_logs (user_id, log_date, ${columns.join(", ")})
-       VALUES ($1, CURRENT_DATE, ${placeholders})
+       VALUES ($1, (now() AT TIME ZONE ${zoneParam})::date, ${placeholders})
        ON CONFLICT (user_id, log_date)
        DO UPDATE SET ${assignments}, updated_at = now()
        RETURNING ${ROUTINE_FIELDS.join(", ")}, active_minutes, sleep_hours,
                  active_source, sleep_source, log_date`,
-      [req.user!.userId, ...values]
+      [req.user!.userId, ...values, zone]
     );
 
     const summary = await summarize(req.user!.userId);
@@ -331,8 +338,10 @@ router.get(
       targetId = requested;
     }
 
+    // A coach viewing a student's day gets the coach's own zone, which is the
+    // right answer for a programme where both stand on the same pitch.
     const { loadDerivedDay } = await import("../services/derivedDay");
-    res.json(await loadDerivedDay(targetId));
+    res.json(await loadDerivedDay(targetId, resolveTimeZone(req.query.tz)));
   })
 );
 

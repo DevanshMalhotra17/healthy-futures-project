@@ -82,7 +82,9 @@
           "background": false
         }
       ],
-      "react-native-health-connect"
+      "react-native-health-connect",
+      "@bacons/apple-targets",
+      "react-native-android-widget"
     ],
     "extra": {
       "eas": {

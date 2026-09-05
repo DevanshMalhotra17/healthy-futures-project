@@ -1,5 +1,17 @@
 import { apiGet, apiPut } from "./client";
 
+// The server runs on UTC, so it can't work out which calendar day an evening
+// practice belongs to on its own. Sending the device's IANA zone lets it resolve
+// "today" the way the athlete experiences it. Guarded because Intl support isn't
+// something to assume on every engine — UTC is the server's fallback.
+function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export type RoutineField =
   | "active_play"
   | "ball_control"
@@ -81,7 +93,11 @@ export async function syncHealth(
   },
   token?: string | null
 ): Promise<HealthSyncResult> {
-  return apiPut<HealthSyncResult>("/routines/health-sync", input, token);
+  return apiPut<HealthSyncResult>(
+    "/routines/health-sync",
+    { ...input, tz: deviceTimeZone() },
+    token
+  );
 }
 
 // Today's items, each earned from evidence rather than a self-reported tick.
@@ -106,6 +122,10 @@ export async function getDerivedDay(
   token?: string | null,
   studentId?: string
 ): Promise<DerivedDay> {
-  const q = studentId ? `?student_id=${encodeURIComponent(studentId)}` : "";
-  return apiGet<DerivedDay>(`/routines/derived${q}`, token);
+  const params = new URLSearchParams();
+  if (studentId) params.set("student_id", studentId);
+  const tz = deviceTimeZone();
+  if (tz) params.set("tz", tz);
+  const q = params.toString();
+  return apiGet<DerivedDay>(`/routines/derived${q ? `?${q}` : ""}`, token);
 }

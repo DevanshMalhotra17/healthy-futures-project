@@ -7,17 +7,32 @@ import { PinIcon, FlameIcon, CheckIcon } from "@/components/Icons";
 import ProgressRing from "@/components/ProgressRing";
 import CompanionCard from "@/components/CompanionCard";
 import HealthScoreCard from "@/components/HealthScoreCard";
+import HealthSyncCard from "@/components/HealthSyncCard";
+import HealthSources from "@/components/HealthSources";
 import PracticeVideoUpload from "@/components/PracticeVideoUpload";
 import TrendsSection from "@/components/TrendsSection";
+import { healthSourceName } from "@/utils/health";
 import { useAuth } from "@/state/AuthContext";
 import { greetingFor, firstNameOf, coachTitle } from "@/utils/greeting";
 import { getCriteria, CriteriaCard } from "@/api/criteria";
-import { getDerivedDay, DerivedDay } from "@/api/routines";
+import { getDerivedDay, DerivedDay, DerivedItem } from "@/api/routines";
 import { listSessions, TrainingSession } from "@/api/sessions";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { RootTabParamList } from "@/navigation/RootNavigator";
 
 type Props = BottomTabScreenProps<RootTabParamList, "Home">;
+
+// The server keeps this phrase platform-neutral so one response serves both
+// stores. Naming the real source is required on iOS (App Review 2.5.1), so the
+// substitution happens here, where the platform is known. Matched exactly against
+// the string in the API's derivedDay service.
+const NEUTRAL_HEALTH_PENDING = "Waiting for your health app";
+
+function detailFor(item: DerivedItem): string {
+  return item.detail === NEUTRAL_HEALTH_PENDING
+    ? `Waiting for ${healthSourceName()}`
+    : item.detail;
+}
 
 export default function HomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -107,6 +122,10 @@ export default function HomeScreen({ navigation }: Props) {
           </View>
         </View>
 
+        {/* Names the health store and does the actual read. Sits directly above
+            the list it fills in, so the connection is obvious. */}
+        <HealthSyncCard onSynced={load} />
+
         {day && (
           <View style={styles.dayList}>
             {day.items.map((item) => (
@@ -118,12 +137,16 @@ export default function HomeScreen({ navigation }: Props) {
                   <Text style={[styles.dayLabel, item.met && styles.dayLabelMet]}>
                     {item.label}
                   </Text>
-                  <Text style={styles.dayDetail}>{item.detail}</Text>
+                  <Text style={styles.dayDetail}>{detailFor(item)}</Text>
                 </View>
               </View>
             ))}
           </View>
         )}
+
+        {/* The 30-minute and 8-hour targets in that list are health
+            recommendations, so they carry their sources (App Review 1.4.1). */}
+        {day && <HealthSources topics={["activity", "sleep"]} />}
 
         {/* Practice video upload */}
         <View style={{ marginTop: spacing.md }}>

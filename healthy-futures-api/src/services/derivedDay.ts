@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { DEFAULT_TIME_ZONE } from "../utils/timezone";
 
 // The at-home routine used to be eight checkboxes a student ticked themselves.
 // Self-reporting was the weak link: a tick cost nothing and proved nothing. Each
@@ -41,13 +42,19 @@ function hoursLabel(h: number): string {
   return `${Math.round(h * 10) / 10} h`;
 }
 
-export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
+export async function loadDerivedDay(
+  userId: string,
+  timeZone: string = DEFAULT_TIME_ZONE
+): Promise<DerivedDay> {
+  // "Today" is resolved in the athlete's zone, not the server's. See utils/timezone.
+  const tz = timeZone;
+
   // Health figures for today, written by PUT /routines/health-sync.
   const health = await pool.query(
     `SELECT active_minutes, sleep_hours, exercise_at
      FROM routine_logs
-     WHERE user_id = $1 AND log_date = CURRENT_DATE`,
-    [userId]
+     WHERE user_id = $1 AND log_date = (now() AT TIME ZONE $2)::date`,
+    [userId, tz]
   );
   const row = health.rows[0];
   const activeMinutes: number | null = row?.active_minutes ?? null;
@@ -62,10 +69,11 @@ export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
     `SELECT s.starts_at, s.title
      FROM sessions s
      JOIN coach_student_links l ON l.coach_id = s.coach_id
-     WHERE l.student_id = $1 AND s.starts_at::date = CURRENT_DATE
+     WHERE l.student_id = $1
+       AND (s.starts_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date
      ORDER BY s.starts_at ASC
      LIMIT 1`,
-    [userId]
+    [userId, tz]
   );
   const sessionStartsAt: Date | null = session.rows[0]
     ? new Date(session.rows[0].starts_at)
@@ -75,9 +83,10 @@ export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
   // A practice clip sent today covers the at-home ball work.
   const clip = await pool.query(
     `SELECT caption FROM practice_videos
-     WHERE user_id = $1 AND created_at::date = CURRENT_DATE
+     WHERE user_id = $1
+       AND (created_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date
      ORDER BY created_at DESC LIMIT 1`,
-    [userId]
+    [userId, tz]
   );
 
   // Nutrition photos logged today, with the earliest time so breakfast-before-
@@ -86,8 +95,8 @@ export async function loadDerivedDay(userId: string): Promise<DerivedDay> {
     `SELECT count(*)::int AS n, min(created_at) AS first_at
      FROM companion_activity
      WHERE user_id = $1 AND companion = 'nutrition'
-       AND created_at::date = CURRENT_DATE`,
-    [userId]
+       AND (created_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date`,
+    [userId, tz]
   );
   const mealCount: number = meals.rows[0]?.n ?? 0;
   const firstMealAt: Date | null = meals.rows[0]?.first_at

@@ -33,6 +33,19 @@ export function FlameIcon({ size = 14, color = "#FCEFD2" }: IconProps) {
   );
 }
 
+// Marks the Apple Health / Health Connect card, so the data source reads as a
+// health integration at a glance rather than as another in-app checklist.
+export function HeartIcon({ size = 15, color = "#C1553D" }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 20.5s-8-5-8-10.4A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 3.1c0 5.4-8 10.4-8 10.4Z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
 export function SoccerBallIcon({ size = 20, color = "#FFFFFF", strokeWidth = 1.8 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">

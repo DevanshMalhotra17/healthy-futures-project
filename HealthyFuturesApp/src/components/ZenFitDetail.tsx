@@ -16,6 +16,7 @@ import {
   getZenHistory,
   submitZenCheckin,
 } from "@/api/zenfit";
+import HealthSources from "@/components/HealthSources";
 
 const ENERGY_LEVELS = [1, 2, 3, 4, 5];
 
@@ -205,6 +206,10 @@ export default function ZenFitDetail() {
           )}
         </View>
       )}
+
+      {/* The assistant's reply is wellbeing guidance, so it carries sources for
+          the same reason the nutrition score does (App Review 1.4.1). */}
+      <HealthSources topics={["wellbeing", "sleep"]} tone="dark" />
     </View>
   );
 }

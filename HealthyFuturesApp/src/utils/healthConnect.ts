@@ -53,7 +53,7 @@ function ms(a: unknown, b: unknown): number {
 }
 
 export async function readTodayAndroid(): Promise<
-  { ok: true; reading: HealthReading } | { ok: false; reason: string }
+  { ok: true; reading: HealthReading } | { ok: false; reason: string; empty?: boolean }
 > {
   if (!hc) {
     return { ok: false, reason: "Health Connect needs a full build of the app." };
@@ -149,7 +149,14 @@ export async function readTodayAndroid(): Promise<
     }
 
     if (activeMinutes === null && sleepHours === null) {
-      return { ok: false, reason: "No exercise or sleep recorded yet today." };
+      // Granted, just nothing logged yet — see the note on readToday in health.ts.
+      return {
+        ok: false,
+        empty: true,
+        reason:
+          "Connected to Health Connect. Nothing is recorded there for today yet, so " +
+          "Exercise and Sleep will fill in once your phone or watch logs some.",
+      };
     }
     return { ok: true, reading: { activeMinutes, sleepHours, exerciseAt } };
   } catch (error) {

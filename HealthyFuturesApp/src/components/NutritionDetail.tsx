@@ -20,6 +20,7 @@ import {
 } from "@/api/nutrition";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/state/AuthContext";
+import HealthSources from "@/components/HealthSources";
 
 export default function NutritionDetail() {
   const { token } = useAuth();
@@ -348,6 +349,12 @@ export default function NutritionDetail() {
           )}
         </View>
       )}
+
+      {/* App Review 1.4.1: the score, portion and timing advice are health
+          information, so the sources ship alongside them. Outside the result
+          block on purpose — visible before you ever run an analysis, and it
+          lands directly beneath the result once you have one. */}
+      <HealthSources topics={["nutrition"]} tone="dark" />
     </View>
   );
 }

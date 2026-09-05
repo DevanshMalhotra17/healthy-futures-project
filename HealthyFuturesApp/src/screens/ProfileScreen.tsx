@@ -20,6 +20,7 @@ import { API_BASE_URL } from "@/api/client";
 import { coachTitle } from "@/utils/greeting";
 import FaceEnrollment from "@/components/FaceEnrollment";
 import NutritionProfileCard from "@/components/NutritionProfileCard";
+import HealthSources from "@/components/HealthSources";
 import { useAuth } from "@/state/AuthContext";
 import {
   Role,
@@ -203,6 +204,13 @@ export default function ProfileScreen() {
           </View>
           <FaceEnrollment />
           <NutritionProfileCard />
+
+          {/* The one place every source is listed together, so the citations are
+              findable without having to run an analysis first. */}
+          <HealthSources
+            topics={["nutrition", "sleep", "activity", "wellbeing"]}
+            title="Health guidance sources"
+          />
 
           <Pressable style={styles.logoutBtn} onPress={() => logout()}>
             <Text style={styles.logoutBtnText}>Log out</Text>
